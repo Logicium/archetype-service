@@ -25,12 +25,13 @@ export class UptimeService {
   @Cron(CronExpression.EVERY_5_MINUTES)
   async probeAll() {
     if (process.env.FEATURE_UPTIME === 'false') return
-    const live = await this.sites.find({ status: 'live' })
-    for (const s of live) await this.probe(s)
+    const em = this.em.fork()
+    const live = await em.getRepository(Site).find({ status: 'live' })
+    for (const s of live) await this.probe(s, em)
   }
 
-  async probe(site: Site) {
-    const target = site.customDomain ? `https://${site.customDomain}` : (site.vercelProductionUrl ? `https://${site.vercelProductionUrl}` : null)
+  async probe(site: Site, em = this.em.fork()) {
+    const target = site.customDomain ? `https://${site.customDomain}` : (site.vercelProductionUrl ? (site.vercelProductionUrl.startsWith('http') ? site.vercelProductionUrl : `https://${site.vercelProductionUrl}`) : null)
     if (!target) return
     const start = Date.now()
     let ok = false, error: string | undefined
@@ -46,11 +47,11 @@ export class UptimeService {
     }
     const latency = Date.now() - start
     const today = new Date(); today.setHours(0, 0, 0, 0)
-    let metric = await this.metrics.findOne({ site: site.id, date: today })
-    if (!metric) metric = this.metrics.create({ site, date: today })
+    let metric = await em.getRepository(SiteMetric).findOne({ site: site.id, date: today })
+    if (!metric) metric = em.getRepository(SiteMetric).create({ site, date: today })
     metric.uptimeLatencyMs = ok ? latency : 0
     metric.uptimeError = ok ? undefined : error
-    await this.em.persistAndFlush(metric)
+    await em.persistAndFlush(metric)
 
     if (ok) {
       this.fails.delete(site.id)

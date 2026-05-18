@@ -1,12 +1,11 @@
 import { Logger } from '@nestjs/common'
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq'
 import { Job } from 'bullmq'
-import { InjectRepository } from '@mikro-orm/nestjs'
-import { EntityManager, EntityRepository } from '@mikro-orm/postgresql'
+import { EntityManager } from '@mikro-orm/postgresql'
 import { Order } from '../entities/order.entity'
 import { Site } from '../entities/site.entity'
+import { SiteContent } from '../entities/site-content.entity'
 import { DeployLog } from '../entities/misc.entity'
-import { SitesService } from '../sites/sites.service'
 import { GitHubProvisioner } from './github.provisioner'
 import { VercelProvisioner } from './vercel.provisioner'
 import { EmailService } from '../common/email.service'
@@ -17,11 +16,7 @@ export class ProvisioningProcessor extends WorkerHost {
   private readonly logger = new Logger(ProvisioningProcessor.name)
 
   constructor(
-    @InjectRepository(Order) private readonly orders: EntityRepository<Order>,
-    @InjectRepository(Site) private readonly sites: EntityRepository<Site>,
-    @InjectRepository(DeployLog) private readonly logs: EntityRepository<DeployLog>,
     private readonly em: EntityManager,
-    private readonly sitesSvc: SitesService,
     private readonly github: GitHubProvisioner,
     private readonly vercel: VercelProvisioner,
     private readonly email: EmailService,
@@ -29,60 +24,121 @@ export class ProvisioningProcessor extends WorkerHost {
 
   async process(job: Job<{ orderId: string }>) {
     if (job.name !== PROVISION_JOB) return
-    const order = await this.orders.findOne({ id: job.data.orderId }, { populate: ['owner'] as never })
+
+    // Fork the EntityManager so this worker context gets its own identity map.
+    const em = this.em.fork()
+    const orders = em.getRepository(Order)
+    const sites = em.getRepository(Site)
+    const logs = em.getRepository(DeployLog)
+
+    const order = await orders.findOne({ id: job.data.orderId }, { populate: ['owner'] as never })
     if (!order) throw new Error(`Order ${job.data.orderId} not found`)
 
     order.status = 'provisioning'
-    await this.em.persistAndFlush(order)
+    await em.persistAndFlush(order)
 
-    let site: Site | null = order.siteId ? await this.sites.findOne({ id: order.siteId }) : null
+    let site: Site | null = order.siteId ? await sites.findOne({ id: order.siteId }) : null
     const wp = order.wizardPayload as { desiredSlug?: string; config?: Record<string, unknown> }
 
+    /** Helper: run a step, log success/failure, rethrow on failure. */
+    const step = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+      const started = Date.now()
+      try {
+        const result = await fn()
+        if (site) {
+          await em.persistAndFlush(logs.create({ site, step: name, status: 'success', message: String(result).slice(0, 4000), durationMs: Date.now() - started }))
+        }
+        this.logger.log(`order=${order.id} step=${name} ok ${Date.now() - started}ms`)
+        return result
+      } catch (e) {
+        const message = (e as Error).message
+        if (site) {
+          await em.persistAndFlush(logs.create({ site, step: name, status: 'failure', message, durationMs: Date.now() - started }))
+        }
+        this.logger.error(`order=${order.id} step=${name} FAIL: ${message}`)
+        throw e
+      }
+    }
+
     // Step 1 — create or reuse the Site row.
-    site = await this.step(order.id, site, 'create-site', async () => {
+    site = await step('create-site', async () => {
       if (site) return site
-      const slug = await this.sitesSvc.generateSlug(wp.desiredSlug || `${order.archetype}-site`)
-      const created = this.sites.create({
+      // Generate a unique slug without touching the global EM.
+      const base = (wp.desiredSlug || `${order.archetype}-site`)
+        .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'site'
+      let candidate = base
+      let n = 0
+      while (await sites.findOne({ slug: candidate })) { candidate = `${base}-${++n}` }
+      const created = sites.create({
         owner: order.owner,
-        slug,
+        slug: candidate,
         archetype: order.archetype,
         plan: order.plan,
         status: 'provisioning',
       })
-      await this.em.persistAndFlush(created)
+      await em.persistAndFlush(created)
       order.siteId = created.id
-      await this.em.persistAndFlush(order)
+      await em.persistAndFlush(order)
       return created
     })
     if (!site) throw new Error('Site row missing after create-site')
 
     // Step 2 — persist initial published content from wizard payload.
-    await this.step(order.id, site, 'seed-content', async () => {
-      const existing = await this.sitesSvc.getPublishedContent(site!.id)
-      if (existing && Object.keys(existing).length) return existing
-      await this.sitesSvc.publish(site!, (wp.config ?? {}) as Record<string, unknown>)
+    await step('seed-content', async () => {
+      const contents = em.getRepository(SiteContent)
+      const existing = await contents.findOne({ site: site!.id, published: true }, { orderBy: { version: 'desc' } })
+      if (existing) return 'already seeded'
+      const latest = await contents.findOne({ site: site!.id }, { orderBy: { version: 'desc' } })
+      const row = contents.create({
+        site: site!,
+        version: (latest?.version ?? 0) + 1,
+        payload: (wp.config ?? {}) as Record<string, unknown>,
+        published: true,
+        publishedAt: new Date(),
+      })
+      await em.persistAndFlush(row)
       return 'published v1'
     })
 
-    // Step 3 — GitHub repo from template + .env.production.
-    const repoInfo = await this.step(order.id, site, 'github-repo', async () => {
+    // Step 3 — GitHub repo from template + .env.production + tenant.config.json.
+    const repoInfo = await step('github-repo', async () => {
       const info = await this.github.createRepo(site!.archetype, site!.slug)
       site!.githubRepo = `${info.owner}/${info.repo}`
-      await this.em.persistAndFlush(site!)
+      await em.persistAndFlush(site!)
+
+      // Runtime env so the deployed UI talks to this API server.
       const envContent = [
         `VITE_SITE_SLUG=${site!.slug}`,
         `VITE_CONTENT_API=${process.env.PUBLIC_BASE_URL || ''}/v1`,
         `VITE_PLATFORM_ENABLED=true`,
       ].join('\n') + '\n'
       await this.github.putFile(info.owner, info.repo, '.env.production', envContent, 'chore: configure runtime overlay')
+
+      // Write the full wizard config as tenant.config.json so the template
+      // can render meaningful default content before the CMS overlay loads.
+      const tenantConfig = {
+        _generated: new Date().toISOString(),
+        archetype: site!.archetype,
+        ...(wp.config ?? {}),
+      }
+      await this.github.putFile(
+        info.owner, info.repo,
+        'public/tenant.config.json',
+        JSON.stringify(tenantConfig, null, 2) + '\n',
+        'chore: inject tenant config from wizard',
+      )
+
       return info
     })
 
     // Step 4 — Vercel project linked to that repo.
-    const project = await this.step(order.id, site, 'vercel-project', async () => {
+    const project = await step('vercel-project', async () => {
       const proj = await this.vercel.createProject(site!.slug, repoInfo!.repo)
       site!.vercelProjectId = proj.id
-      await this.em.persistAndFlush(site!)
+      // Store the canonical URL immediately from the actual project name Vercel assigned.
+      // Vercel may rename the project if the slug collides (e.g. "mesa-site-1" → "mesa-ten").
+      site!.vercelProductionUrl = `https://${proj.projectName}.vercel.app`
+      await em.persistAndFlush(site!)
       await this.vercel.setEnv(proj.id, 'VITE_SITE_SLUG', site!.slug)
       await this.vercel.setEnv(proj.id, 'VITE_CONTENT_API', `${process.env.PUBLIC_BASE_URL || ''}/v1`)
       await this.vercel.setEnv(proj.id, 'VITE_PLATFORM_ENABLED', 'true')
@@ -90,17 +146,16 @@ export class ProvisioningProcessor extends WorkerHost {
     })
 
     // Step 5 — trigger first deployment.
-    await this.step(order.id, site, 'vercel-deploy', async () => {
-      const dep = await this.vercel.triggerDeployment(project!.id, repoInfo!.repo)
-      site!.vercelProductionUrl = dep.url
+    await step('vercel-deploy', async () => {
+      const dep = await this.vercel.triggerDeployment(project!.id, repoInfo!.repo, repoInfo!.repoId)
       site!.status = 'live'
-      await this.em.persistAndFlush(site!)
+      await em.persistAndFlush(site!)
       return dep
     })
 
     // Step 6 — notify owner with magic-link to the admin area.
-    await this.step(order.id, site, 'notify-owner', async () => {
-      const productionUrl = site!.vercelProductionUrl ? `https://${site!.vercelProductionUrl}` : '(deploying)'
+    await step('notify-owner', async () => {
+      const productionUrl = site!.vercelProductionUrl ?? '(deploying)'
       await this.email.send({
         to: order.owner.email,
         subject: `Your ${site!.slug} site is live`,
@@ -113,36 +168,19 @@ export class ProvisioningProcessor extends WorkerHost {
     })
 
     order.status = 'live'
-    await this.em.persistAndFlush(order)
+    await em.persistAndFlush(order)
   }
 
-  private async step<T>(orderId: string, site: Site | null, name: string, fn: () => Promise<T>): Promise<T> {
-    const started = Date.now()
-    try {
-      const result = await fn()
-      if (site) {
-        await this.em.persistAndFlush(this.logs.create({ site, step: name, status: 'success', message: String(result).slice(0, 4000), durationMs: Date.now() - started }))
-      }
-      this.logger.log(`order=${orderId} step=${name} ok ${Date.now() - started}ms`)
-      return result
-    } catch (e) {
-      const message = (e as Error).message
-      if (site) {
-        await this.em.persistAndFlush(this.logs.create({ site, step: name, status: 'failure', message, durationMs: Date.now() - started }))
-      }
-      this.logger.error(`order=${orderId} step=${name} FAIL: ${message}`)
-      throw e
-    }
-  }
 
   @OnWorkerEvent('failed')
   async onFailed(job: Job, err: Error) {
     if (job.attemptsMade >= (job.opts.attempts ?? 1)) {
-      const order = await this.orders.findOne({ id: job.data.orderId })
+      const em = this.em.fork()
+      const order = await em.findOne(Order, { id: job.data.orderId })
       if (order) {
         order.status = 'failed'
         order.failureReason = err.message
-        await this.em.persistAndFlush(order)
+        await em.persistAndFlush(order)
         await this.email.alertAdmin(`Provisioning failed for order ${order.id}`, `<pre>${err.stack || err.message}</pre>`)
       }
     }

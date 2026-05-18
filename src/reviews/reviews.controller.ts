@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Header, Param, Post, Req, UseGuards } from '@nestjs/common'
+import { BadRequestException, Body, Controller, Get, Header, Injectable, Logger, Param, Post, Req, UseGuards } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import { InjectRepository } from '@mikro-orm/nestjs'
 import { EntityManager, EntityRepository } from '@mikro-orm/postgresql'
@@ -8,6 +8,60 @@ import { Review } from '../entities/misc.entity'
 import { Site } from '../entities/site.entity'
 import { JwtAuthGuard, AuthRequest } from '../auth/jwt.guard'
 import { SitesService } from '../sites/sites.service'
+
+@Injectable()
+export class ReviewsService {
+  private readonly logger = new Logger(ReviewsService.name)
+  private readonly gmaps = new GMaps({})
+
+  constructor(
+    @InjectRepository(Review) private readonly reviews: EntityRepository<Review>,
+    @InjectRepository(Site) private readonly sites: EntityRepository<Site>,
+    private readonly em: EntityManager,
+  ) {}
+
+  async fetchForSite(site: Site, em = this.em.fork()): Promise<number> {
+    const key = process.env.GOOGLE_PLACES_API_KEY
+    if (!key || !site.googlePlaceId) return 0
+    try {
+      const res = await this.gmaps.placeDetails({
+        params: { place_id: site.googlePlaceId, fields: ['reviews'], key },
+      })
+      const reviews = res.data.result.reviews ?? []
+      let added = 0
+      for (const rv of reviews) {
+        const externalId = `${site.googlePlaceId}:${rv.time}`
+        const existing = await em.getRepository(Review).findOne({ site: site.id, externalId })
+        if (existing) continue
+        const row = em.getRepository(Review).create({
+          site,
+          source: 'google',
+          rating: rv.rating ?? 5,
+          author: rv.author_name ?? 'Anonymous',
+          text: (rv.text ?? '').slice(0, 2000),
+          externalId,
+        })
+        em.persist(row)
+        added += 1
+      }
+      await em.flush()
+      return added
+    } catch (e) {
+      this.logger.warn(`Google reviews fetch failed for ${site.slug}: ${(e as Error).message}`)
+      return 0
+    }
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async pollAll() {
+    if (!process.env.GOOGLE_PLACES_API_KEY) return
+    const em = this.em.fork()
+    const sites = await em.getRepository(Site).find({ status: 'live' })
+    for (const s of sites) {
+      if (s.googlePlaceId) await this.fetchForSite(s, em)
+    }
+  }
+}
 
 @ApiTags('reviews')
 @Controller('v1/sites')
@@ -54,60 +108,5 @@ export class AdminReviewsController {
     const r = this.reviews.create({ site, source: 'manual', author: body.author, rating: body.rating ?? 5, text: body.text })
     await this.em.persistAndFlush(r)
     return { id: r.id }
-  }
-}
-
-import { Injectable, Logger } from '@nestjs/common'
-
-@Injectable()
-export class ReviewsService {
-  private readonly logger = new Logger(ReviewsService.name)
-  private readonly gmaps = new GMaps({})
-
-  constructor(
-    @InjectRepository(Review) private readonly reviews: EntityRepository<Review>,
-    @InjectRepository(Site) private readonly sites: EntityRepository<Site>,
-    private readonly em: EntityManager,
-  ) {}
-
-  async fetchForSite(site: Site): Promise<number> {
-    const key = process.env.GOOGLE_PLACES_API_KEY
-    if (!key || !site.googlePlaceId) return 0
-    try {
-      const res = await this.gmaps.placeDetails({
-        params: { place_id: site.googlePlaceId, fields: ['reviews'], key },
-      })
-      const reviews = res.data.result.reviews ?? []
-      let added = 0
-      for (const rv of reviews) {
-        const externalId = `${site.googlePlaceId}:${rv.time}`
-        const existing = await this.reviews.findOne({ site: site.id, externalId })
-        if (existing) continue
-        const row = this.reviews.create({
-          site,
-          source: 'google',
-          rating: rv.rating ?? 5,
-          author: rv.author_name ?? 'Anonymous',
-          text: (rv.text ?? '').slice(0, 2000),
-          externalId,
-        })
-        this.em.persist(row)
-        added += 1
-      }
-      await this.em.flush()
-      return added
-    } catch (e) {
-      this.logger.warn(`Google reviews fetch failed for ${site.slug}: ${(e as Error).message}`)
-      return 0
-    }
-  }
-
-  @Cron(CronExpression.EVERY_HOUR)
-  async pollAll() {
-    if (!process.env.GOOGLE_PLACES_API_KEY) return
-    const sites = await this.sites.find({ status: 'live' })
-    for (const s of sites) {
-      if (s.googlePlaceId) await this.fetchForSite(s)
-    }
   }
 }

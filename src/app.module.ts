@@ -24,7 +24,14 @@ const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
     MikroOrmModule.forRoot(),
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
-    BullModule.forRoot({ connection: { url: redisUrl } as never }),
+    BullModule.forRoot({
+      connection: {
+        url: redisUrl,
+        // Required by BullMQ workers; also needed by managed/TLS providers (Aiven/Upstash)
+        maxRetriesPerRequest: null,
+        enableReadyCheck: false,
+      } as never,
+    }),
     CommonModule,
     AuthModule,
     SitesModule,

@@ -1,6 +1,11 @@
 import { Body, Controller, Get, Header, Param, Post, Put, Req, UseGuards } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
+import { InjectRepository } from '@mikro-orm/nestjs'
+import { EntityRepository } from '@mikro-orm/postgresql'
 import { SitesService } from './sites.service'
+import { DeployLog } from '../entities/misc.entity'
+import { GitHubProvisioner } from '../provisioning/github.provisioner'
+import { VercelProvisioner } from '../provisioning/vercel.provisioner'
 import { JwtAuthGuard, AuthRequest } from '../auth/jwt.guard'
 
 /** Public read endpoint — fetched by every live archetype site at boot. */
@@ -28,7 +33,12 @@ export class PublicSitesController {
 @UseGuards(JwtAuthGuard)
 @Controller('v1/admin/sites')
 export class AdminSitesController {
-  constructor(private readonly sites: SitesService) {}
+  constructor(
+    private readonly sites: SitesService,
+    @InjectRepository(DeployLog) private readonly deployLogs: EntityRepository<DeployLog>,
+    private readonly github: GitHubProvisioner,
+    private readonly vercel: VercelProvisioner,
+  ) {}
 
   @Get()
   async list(@Req() req: AuthRequest) {
@@ -81,5 +91,30 @@ export class AdminSitesController {
     const site = await this.sites.getOwned(id, req.owner)
     const row = await this.sites.restoreVersion(site, parseInt(version, 10))
     return { version: row.version, publishedAt: row.publishedAt }
+  }
+
+  @Post(':id/redeploy')
+  async redeploy(@Param('id') id: string, @Req() req: AuthRequest) {
+    const site = await this.sites.getOwned(id, req.owner)
+    if (!site.vercelProjectId) throw new Error('No Vercel project linked to this site')
+    if (!site.githubRepo) throw new Error('No GitHub repo linked to this site')
+    const repoId = await this.github.getRepoId(site.githubRepo)
+    const dep = await this.vercel.redeploy(site.vercelProjectId, site.githubRepo, repoId)
+    // Always refresh the stable production URL in case the stored value was a deployment-specific URL.
+    const stableDomain = await this.vercel.getProductionUrl(site.vercelProjectId)
+    if (stableDomain) {
+      const url = stableDomain.startsWith('http') ? stableDomain : `https://${stableDomain}`
+      site.vercelProductionUrl = url
+      site.status = 'live'
+      await this.sites.save(site)
+    }
+    return { ok: true, deploymentId: dep.id, url: site.vercelProductionUrl ?? dep.url }
+  }
+
+  @Get(':id/deploy-logs')
+  async getDeployLogs(@Param('id') id: string, @Req() req: AuthRequest) {
+    const site = await this.sites.getOwned(id, req.owner)
+    const logs = await this.deployLogs.find({ site: site.id }, { orderBy: { createdAt: 'asc' }, limit: 100 })
+    return logs.map(l => ({ step: l.step, status: l.status, message: l.message, durationMs: l.durationMs, createdAt: l.createdAt }))
   }
 }

@@ -30,6 +30,10 @@ export class SitesService {
     return site
   }
 
+  async save(site: Site): Promise<void> {
+    await this.em.persistAndFlush(site)
+  }
+
   /** Returns the latest published overlay payload (or null if no publish yet). */
   async getPublishedContent(siteId: string): Promise<Record<string, unknown> | null> {
     const row = await this.contents.findOne({ site: siteId, published: true }, { orderBy: { version: 'desc' } })

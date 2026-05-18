@@ -4,7 +4,7 @@ import { ValidationPipe } from '@nestjs/common'
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger'
 import { MikroORM } from '@mikro-orm/core'
 import helmet from 'helmet'
-import cookieParser from 'cookie-parser'
+import * as cookieParser from 'cookie-parser'
 import { AppModule } from './app.module'
 import { SitesService } from './sites/sites.service'
 

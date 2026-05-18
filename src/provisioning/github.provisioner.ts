@@ -24,15 +24,15 @@ export class GitHubProvisioner {
   }
 
   /** Idempotent: returns existing repo if one with the same name already exists. */
-  async createRepo(kind: 'mesa' | 'hearth' | 'vault' | 'keystone', name: string): Promise<{ owner: string; repo: string; defaultBranch: string }> {
+  async createRepo(kind: 'mesa' | 'hearth' | 'vault' | 'keystone', name: string): Promise<{ owner: string; repo: string; repoId: number; defaultBranch: string }> {
     const org = process.env.GITHUB_ORG
     if (!this.client || !org) {
-      return { owner: org || 'apotome-labs', repo: name, defaultBranch: 'main' }
+      return { owner: org || 'logicium', repo: name, repoId: 0, defaultBranch: 'main' }
     }
     const template = this.templateFor(kind)
     try {
       const existing = await this.client.repos.get({ owner: org, repo: name })
-      return { owner: org, repo: name, defaultBranch: existing.data.default_branch }
+      return { owner: org, repo: name, repoId: existing.data.id, defaultBranch: existing.data.default_branch }
     } catch {
       // not found — create
     }
@@ -44,7 +44,7 @@ export class GitHubProvisioner {
       private: false,
       include_all_branches: false,
     })
-    return { owner: org, repo: name, defaultBranch: res.data.default_branch ?? 'main' }
+    return { owner: org, repo: name, repoId: res.data.id, defaultBranch: res.data.default_branch ?? 'main' }
   }
 
   /** Writes a single file by path; creates if missing, updates if present. Idempotent. */
@@ -63,5 +63,13 @@ export class GitHubProvisioner {
       content: Buffer.from(content, 'utf8').toString('base64'),
       sha,
     })
+  }
+
+  /** Returns the numeric GitHub repo ID needed for Vercel gitSource. */
+  async getRepoId(ownerRepo: string): Promise<number> {
+    if (!this.client) return 0
+    const [owner, repo] = ownerRepo.split('/')
+    const res = await this.client.repos.get({ owner, repo })
+    return res.data.id
   }
 }

@@ -54,8 +54,8 @@ export class AuthService {
     await this.em.persistAndFlush(owner)
 
     const token = this.jwt.sign({ sub: owner.id, kind: 'magic', raw }, { expiresIn: `${MAGIC_LINK_TTL_MIN}m` })
-    const base = process.env.PUBLIC_BASE_URL || 'http://localhost:3001'
-    const link = `${base}/v1/auth/callback?token=${encodeURIComponent(token)}`
+    const adminBase = process.env.ADMIN_UI_URL || 'http://localhost:5174'
+    const link = `${adminBase}/admin/verify?token=${encodeURIComponent(token)}`
 
     await this.email.send({
       to: owner.email,
