@@ -38,6 +38,10 @@ export class Site {
   @Property({ nullable: true })
   vercelProductionUrl?: string
 
+  /** SHA of the template repo's default branch at provision time — used to detect updates. */
+  @Property({ nullable: true })
+  templateCommitSha?: string
+
   @Property({ nullable: true })
   customDomain?: string
 

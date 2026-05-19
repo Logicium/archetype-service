@@ -6,16 +6,17 @@ import { Site } from '../entities/site.entity'
 import { SiteContent } from '../entities/site-content.entity'
 import { DeployLog } from '../entities/misc.entity'
 import { ProvisioningProcessor } from './provisioning.processor'
+import { SiteUpdateProcessor } from './site-update.processor'
 import { GitHubProvisioner } from './github.provisioner'
 import { VercelProvisioner } from './vercel.provisioner'
-import { PROVISION_QUEUE } from './provisioning.constants'
+import { PROVISION_QUEUE, SITE_UPDATE_QUEUE } from './provisioning.constants'
 
 @Module({
   imports: [
     MikroOrmModule.forFeature([Order, Site, SiteContent, DeployLog]),
-    BullModule.registerQueue({ name: PROVISION_QUEUE }),
+    BullModule.registerQueue({ name: PROVISION_QUEUE }, { name: SITE_UPDATE_QUEUE }),
   ],
-  providers: [ProvisioningProcessor, GitHubProvisioner, VercelProvisioner],
-  exports: [GitHubProvisioner, VercelProvisioner],
+  providers: [ProvisioningProcessor, SiteUpdateProcessor, GitHubProvisioner, VercelProvisioner],
+  exports: [GitHubProvisioner, VercelProvisioner, BullModule],
 })
 export class ProvisioningModule {}

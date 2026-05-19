@@ -128,6 +128,17 @@ export class ProvisioningProcessor extends WorkerHost {
         'chore: inject tenant config from wizard',
       )
 
+      // Record the template's current commit SHA so we can detect updates later.
+      try {
+        const templateRepo = this.github.templateFor(site!.archetype)
+        const templateOwner = process.env.GITHUB_ORG || info.owner
+        const templateInfo = await this.github.getRepoInfo(`${templateOwner}/${templateRepo}`)
+        site!.templateCommitSha = await this.github.getLatestCommitSha(templateOwner, templateRepo, templateInfo.defaultBranch)
+        await em.persistAndFlush(site!)
+      } catch (e) {
+        this.logger.warn(`template SHA capture failed: ${(e as Error).message}`)
+      }
+
       return info
     })
 
@@ -147,7 +158,7 @@ export class ProvisioningProcessor extends WorkerHost {
 
     // Step 5 — trigger first deployment.
     await step('vercel-deploy', async () => {
-      const dep = await this.vercel.triggerDeployment(project!.id, repoInfo!.repo, repoInfo!.repoId)
+      const dep = await this.vercel.triggerDeployment(project!.id, repoInfo!.repo, repoInfo!.repoId, repoInfo!.defaultBranch)
       site!.status = 'live'
       await em.persistAndFlush(site!)
       return dep
