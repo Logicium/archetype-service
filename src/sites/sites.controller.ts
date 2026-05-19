@@ -47,12 +47,23 @@ export class AdminSitesController {
   @Get()
   async list(@Req() req: AuthRequest) {
     const sites = await this.sites.listForOwner(req.owner)
+    // Resolve production URLs from Vercel in parallel so the admin always shows the real URL
+    // (Vercel may have auto-renamed the project, e.g. "mesa-site" → "mesa-site-pied").
+    // The result is persisted as a side-effect so subsequent loads are already accurate.
+    await Promise.all(sites.map(async s => {
+      if (!s.vercelProjectId) return
+      const fresh = await this.vercel.getProductionUrl(s.vercelProjectId)
+      if (fresh && fresh !== s.vercelProductionUrl) {
+        s.vercelProductionUrl = fresh
+        await this.sites.save(s)
+      }
+    }))
     return sites.map(s => ({
       id: s.id,
       slug: s.slug,
       archetype: s.archetype,
       status: s.status,
-      productionUrl: s.vercelProductionUrl,
+      productionUrl: s.customDomain ? `https://${s.customDomain}` : s.vercelProductionUrl,
       customDomain: s.customDomain,
     }))
   }

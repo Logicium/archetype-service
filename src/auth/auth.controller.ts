@@ -58,7 +58,7 @@ export class AuthController {
     if (!token) throw new UnauthorizedException('Missing token')
     const session = await this.auth.consumeMagicLink(token)
     setSessionCookie(res, session.token)
-    return { ok: true, owner: session.owner }
+    return { ok: true, sessionToken: session.token, owner: session.owner }
   }
 
   // ── Password ─────────────────────────────────────────────────────────────
@@ -66,14 +66,14 @@ export class AuthController {
   async register(@Body() dto: PasswordRegisterDto, @Res({ passthrough: true }) res: Response) {
     const { token, owner } = await this.auth.registerWithPassword(dto.email, dto.password, dto.name)
     setSessionCookie(res, token)
-    return { ok: true, owner: { id: owner.id, email: owner.email, name: owner.name } }
+    return { ok: true, sessionToken: token, owner: { id: owner.id, email: owner.email, name: owner.name } }
   }
 
   @Post('login')
   async login(@Body() dto: PasswordLoginDto, @Res({ passthrough: true }) res: Response) {
     const { token, owner } = await this.auth.loginWithPassword(dto.email, dto.password)
     setSessionCookie(res, token)
-    return { ok: true, owner: { id: owner.id, email: owner.email, name: owner.name } }
+    return { ok: true, sessionToken: token, owner: { id: owner.id, email: owner.email, name: owner.name } }
   }
 
   @UseGuards(JwtAuthGuard)
