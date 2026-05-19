@@ -41,7 +41,7 @@ export class GitHubProvisioner {
       template_repo: template,
       owner: org,
       name,
-      private: false,
+      private: true,
       include_all_branches: false,
     })
     return { owner: org, repo: name, repoId: res.data.id, defaultBranch: res.data.default_branch ?? 'main' }
