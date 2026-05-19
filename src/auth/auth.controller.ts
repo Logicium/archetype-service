@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post, Query, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common'
-import type { Response } from 'express'
+import type { Request, Response } from 'express'
 import { IsEmail, IsOptional, IsString, MinLength } from 'class-validator'
 import { ApiTags } from '@nestjs/swagger'
 import { AuthService } from './auth.service'
@@ -42,8 +42,11 @@ export class AuthController {
 
   // ── Magic link ───────────────────────────────────────────────────────────
   @Post('request-link')
-  async requestLink(@Body() dto: RequestLinkDto) {
-    await this.auth.requestMagicLink(dto.email, dto.name)
+  async requestLink(@Body() dto: RequestLinkDto, @Req() req: Request) {
+    // Use the request's own Origin so the emailed link always points back to
+    // wherever the request came from (any preview URL, alias, or localhost).
+    const origin = (req.headers['origin'] as string | undefined) || process.env.ADMIN_UI_URL || 'http://localhost:5174'
+    await this.auth.requestMagicLink(dto.email, dto.name, origin)
     // Always return ok — don't leak whether an account exists.
     return { ok: true }
   }

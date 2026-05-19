@@ -39,7 +39,7 @@ export class AuthService {
     private readonly email: EmailService,
   ) {}
 
-  async requestMagicLink(email: string, name?: string) {
+  async requestMagicLink(email: string, name?: string, adminBase?: string) {
     const lower = email.toLowerCase().trim()
     let owner = await this.owners.findOne({ email: lower })
     if (!owner) {
@@ -54,8 +54,8 @@ export class AuthService {
     await this.em.persistAndFlush(owner)
 
     const token = this.jwt.sign({ sub: owner.id, kind: 'magic', raw }, { expiresIn: `${MAGIC_LINK_TTL_MIN}m` })
-    const adminBase = process.env.ADMIN_UI_URL || 'http://localhost:5174'
-    const link = `${adminBase}/admin/verify?token=${encodeURIComponent(token)}`
+    const base = adminBase || process.env.ADMIN_UI_URL || 'http://localhost:5174'
+    const link = `${base}/admin/verify?token=${encodeURIComponent(token)}`
 
     await this.email.send({
       to: owner.email,
