@@ -26,11 +26,13 @@ class SetPasswordDto {
 }
 
 function setSessionCookie(res: Response, token: string) {
+  const isProd = process.env.NODE_ENV === 'production'
   res.cookie('archetype_session', token, {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.COOKIE_SECURE === 'true',
-    domain: process.env.COOKIE_DOMAIN || undefined,
+    // SameSite=None is required for cross-domain credentialed fetch (Vercel → Render).
+    // Lax is fine for local dev where both sides are localhost.
+    sameSite: isProd ? 'none' : 'lax',
+    secure: isProd,
     maxAge: 30 * 24 * 60 * 60 * 1000,
   })
 }
@@ -90,7 +92,8 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Post('logout')
   logout(@Res({ passthrough: true }) res: Response) {
-    res.clearCookie('archetype_session', { domain: process.env.COOKIE_DOMAIN || undefined })
+    const isProd = process.env.NODE_ENV === 'production'
+    res.clearCookie('archetype_session', { sameSite: isProd ? 'none' : 'lax', secure: isProd })
     return { ok: true }
   }
 }
