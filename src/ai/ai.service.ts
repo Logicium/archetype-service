@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import type { SuggestDto } from './ai.controller'
 
-const MODEL = 'gemini-1.5-flash'
+const MODEL = 'gemini-2.5-flash'
 
 /** Human-readable field descriptions used to shape the prompt */
 const FIELD_PROMPTS: Record<string, string> = {
