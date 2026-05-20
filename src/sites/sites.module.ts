@@ -9,6 +9,7 @@ import { AdminSitesController, PublicSitesController } from './sites.controller'
 import { AuthModule } from '../auth/auth.module'
 import { ProvisioningModule } from '../provisioning/provisioning.module'
 import { SITE_UPDATE_QUEUE } from '../provisioning/provisioning.constants'
+import { ScreenshotModule } from '../screenshot/screenshot.module'
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { SITE_UPDATE_QUEUE } from '../provisioning/provisioning.constants'
     BullModule.registerQueue({ name: SITE_UPDATE_QUEUE }),
     AuthModule,
     ProvisioningModule,
+    ScreenshotModule,
   ],
   controllers: [PublicSitesController, AdminSitesController],
   providers: [SitesService],

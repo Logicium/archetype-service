@@ -1,10 +1,12 @@
-import { Body, Controller, Get, Header, Param, Post, Put, Req, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, Header, Param, Post, Put, Req, Res, UseGuards } from '@nestjs/common'
+import type { Response } from 'express'
 import { ApiTags } from '@nestjs/swagger'
 import { InjectRepository } from '@mikro-orm/nestjs'
 import { EntityRepository } from '@mikro-orm/postgresql'
 import { InjectQueue } from '@nestjs/bullmq'
 import { Queue } from 'bullmq'
 import { SitesService } from './sites.service'
+import { ScreenshotService } from '../screenshot/screenshot.service'
 import { DeployLog } from '../entities/misc.entity'
 import { GitHubProvisioner } from '../provisioning/github.provisioner'
 import { VercelProvisioner } from '../provisioning/vercel.provisioner'
@@ -42,6 +44,7 @@ export class AdminSitesController {
     private readonly github: GitHubProvisioner,
     private readonly vercel: VercelProvisioner,
     @InjectQueue(SITE_UPDATE_QUEUE) private readonly updateQueue: Queue,
+    private readonly screenshot: ScreenshotService,
   ) {}
 
   @Get()
@@ -54,6 +57,8 @@ export class AdminSitesController {
       if (!s.vercelProjectId) return
       const fresh = await this.vercel.getProductionUrl(s.vercelProjectId)
       if (fresh && fresh !== s.vercelProductionUrl) {
+        // Invalidate the old screenshot cache key so the next capture uses the new URL
+        if (s.vercelProductionUrl) this.screenshot.invalidate(s.vercelProductionUrl)
         s.vercelProductionUrl = fresh
         await this.sites.save(s)
       }
@@ -156,5 +161,52 @@ export class AdminSitesController {
     const site = await this.sites.getOwned(id, req.owner)
     const job = await this.updateQueue.add(SITE_UPDATE_JOB, { siteId: site.id }, { removeOnComplete: 50, removeOnFail: 50 })
     return { ok: true, jobId: job.id }
+  }
+
+  /**
+   * Returns a cached screenshot PNG of the site's production URL.
+   * Always resolves the live URL from Vercel first (handles renamed projects like
+   * vault-site → vault-site-ten) and invalidates the old cache key if the URL changed.
+   * Accepts ?fresh=1 to force a new capture of the current URL.
+   */
+  @Get(':id/screenshot')
+  async getScreenshot(
+    @Param('id') id: string,
+    @Req() req: AuthRequest & { query: { fresh?: string } },
+    @Res() res: Response,
+  ) {
+    const site = await this.sites.getOwned(id, req.owner)
+
+    // Resolve the authoritative production URL — always ask Vercel so renamed
+    // projects (e.g. mesa-site → mesa-site-pied) are caught immediately.
+    let url: string | undefined
+    if (site.customDomain) {
+      url = `https://${site.customDomain}`
+    } else if (site.vercelProjectId) {
+      const fresh = await this.vercel.getProductionUrl(site.vercelProjectId).catch(() => null)
+      if (fresh) {
+        if (fresh !== site.vercelProductionUrl) {
+          if (site.vercelProductionUrl) this.screenshot.invalidate(site.vercelProductionUrl)
+          site.vercelProductionUrl = fresh
+          await this.sites.save(site)
+        }
+        url = fresh
+      } else {
+        url = site.vercelProductionUrl
+      }
+    } else {
+      url = site.vercelProductionUrl
+    }
+
+    if (!url) {
+      res.status(404).json({ error: 'No production URL for this site' })
+      return
+    }
+    if (req.query.fresh === '1') this.screenshot.invalidate(url)
+    const png = await this.screenshot.capture(url)
+    res
+      .set('Content-Type', 'image/png')
+      .set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400')
+      .send(png)
   }
 }

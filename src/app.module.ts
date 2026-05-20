@@ -15,6 +15,7 @@ import { InstagramModule } from './instagram/instagram.module'
 import { AnalyticsModule } from './analytics/analytics.module'
 import { DomainsModule } from './domains/domains.module'
 import { ExtrasModule } from './extras/extras.module'
+import { AiModule } from './ai/ai.module'
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
 
@@ -43,6 +44,7 @@ const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
     AnalyticsModule,
     DomainsModule,
     ExtrasModule,
+    AiModule,
   ],
 })
 export class AppModule {}
