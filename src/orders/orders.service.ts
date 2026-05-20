@@ -169,11 +169,20 @@ export class OrdersService {
       this.logger.warn(`Provisioning disabled by flag — order ${order.id} marked paid only`)
       return
     }
+    // BullMQ deduplicates by jobId — a prior completed/failed job with the same id
+    // would silently drop a re-enqueue. Remove any existing job first so reprovision works.
+    const existing = await this.provisionQueue.getJob(`provision-${order.id}`)
+    if (existing) {
+      try { await existing.remove() } catch (e) {
+        this.logger.warn(`Could not remove existing provision job for order ${order.id}: ${(e as Error).message}`)
+      }
+    }
     await this.provisionQueue.add(
       PROVISION_JOB,
       { orderId: order.id },
       { jobId: `provision-${order.id}`, attempts: 3, backoff: { type: 'exponential', delay: 60_000 } },
     )
+    this.logger.log(`Enqueued provisioning job provision-${order.id}`)
   }
 
   async getPublicStatus(id: string) {
@@ -197,5 +206,117 @@ export class OrdersService {
     await this.em.persistAndFlush(order)
     await this.enqueueProvisioning(order)
     return { ok: true }
+  }
+
+  /** Find the order that produced a given site (owned by `owner`). */
+  async findBySiteId(siteId: string, owner: Owner): Promise<Order> {
+    const order = await this.orders.findOne({ siteId, owner: owner.id }, { populate: ['owner'] as never })
+    if (!order) throw new NotFoundException('No order linked to this site')
+    return order
+  }
+
+  /**
+   * Force-reprovision a stuck site: resets the order back to `paid` and re-enqueues
+   * the provisioning job. Idempotent steps in the processor (createRepo, createProject,
+   * putFile, etc.) will reuse existing GitHub/Vercel resources instead of duplicating them.
+   */
+  async reprovisionForSite(siteId: string, owner: Owner) {
+    const order = await this.findBySiteId(siteId, owner)
+    order.status = 'paid'
+    order.failureReason = undefined
+    await this.em.persistAndFlush(order)
+    await this.enqueueProvisioning(order)
+    return { ok: true, orderId: order.id }
+  }
+
+  /**
+   * Diagnostic: look up the Stripe checkout session + payment intent + recent webhook
+   * events for an order so an operator can determine whether payment actually went
+   * through when the site is stuck in `pending`/`provisioning`.
+   */
+  async getStripeStatusForSite(siteId: string, owner: Owner) {
+    const order = await this.findBySiteId(siteId, owner)
+    return this.buildStripeStatus(order)
+  }
+
+  /** If Stripe confirms the session was paid but the order never flipped, mark paid + enqueue. */
+  async resolveBillingForSite(siteId: string, owner: Owner) {
+    const order = await this.findBySiteId(siteId, owner)
+    if (!this.stripe) throw new BadRequestException('Stripe not configured')
+    if (!order.stripeSessionId) throw new BadRequestException('Order has no Stripe session')
+    const session = await this.stripe.checkout.sessions.retrieve(order.stripeSessionId)
+    if (session.payment_status !== 'paid') {
+      throw new BadRequestException(`Stripe session payment_status=${session.payment_status}; refusing to mark paid`)
+    }
+    if (order.status === 'pending') {
+      order.status = 'paid'
+      order.stripeCustomerId = typeof session.customer === 'string' ? session.customer : undefined
+      await this.em.persistAndFlush(order)
+    } else if (order.status === 'failed') {
+      order.status = 'paid'
+      order.failureReason = undefined
+      await this.em.persistAndFlush(order)
+    }
+    await this.enqueueProvisioning(order)
+    return { ok: true, orderId: order.id, orderStatus: order.status }
+  }
+
+  private async buildStripeStatus(order: Order) {
+    const base = {
+      orderId: order.id,
+      orderStatus: order.status,
+      stripeSessionId: order.stripeSessionId ?? null,
+      stripeCustomerId: order.stripeCustomerId ?? null,
+      failureReason: order.failureReason ?? null,
+    }
+    if (!this.stripe) return { ...base, stripeConfigured: false }
+    if (!order.stripeSessionId) return { ...base, stripeConfigured: true, session: null }
+
+    try {
+      const session = await this.stripe.checkout.sessions.retrieve(order.stripeSessionId, {
+        expand: ['payment_intent'],
+      })
+      const pi = (typeof session.payment_intent === 'object' && session.payment_intent) ? session.payment_intent as Stripe.PaymentIntent : null
+
+      // Pull recent checkout.session.* events for this session so we can show whether
+      // a webhook ever fired (and what it looked like). Stripe returns most-recent first.
+      let events: Array<{ id: string; type: string; created: number }> = []
+      try {
+        const ev = await this.stripe.events.list({ limit: 25, type: 'checkout.session.completed' })
+        events = ev.data
+          .filter(e => (e.data?.object as { id?: string } | undefined)?.id === session.id)
+          .map(e => ({ id: e.id, type: e.type, created: e.created }))
+      } catch { /* event listing is optional */ }
+
+      const paidButOrderStuck = session.payment_status === 'paid' && order.status === 'pending'
+
+      return {
+        ...base,
+        stripeConfigured: true,
+        session: {
+          id: session.id,
+          paymentStatus: session.payment_status,
+          status: session.status,
+          amountTotal: session.amount_total,
+          currency: session.currency,
+          customerEmail: session.customer_email,
+          createdAt: new Date(session.created * 1000).toISOString(),
+        },
+        paymentIntent: pi ? {
+          id: pi.id,
+          status: pi.status,
+          amount: pi.amount,
+          amountReceived: pi.amount_received,
+          lastPaymentError: pi.last_payment_error?.message ?? null,
+        } : null,
+        webhookEvents: events,
+        canResolve: paidButOrderStuck,
+        notes: paidButOrderStuck
+          ? 'Stripe confirms payment but the order never flipped to paid \u2014 webhook likely missed. You can mark paid + provision.'
+          : null,
+      }
+    } catch (e) {
+      return { ...base, stripeConfigured: true, error: (e as Error).message }
+    }
   }
 }

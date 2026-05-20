@@ -10,6 +10,7 @@ import { AuthModule } from '../auth/auth.module'
 import { ProvisioningModule } from '../provisioning/provisioning.module'
 import { SITE_UPDATE_QUEUE } from '../provisioning/provisioning.constants'
 import { ScreenshotModule } from '../screenshot/screenshot.module'
+import { OrdersModule } from '../orders/orders.module'
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ScreenshotModule } from '../screenshot/screenshot.module'
     AuthModule,
     ProvisioningModule,
     ScreenshotModule,
+    OrdersModule,
   ],
   controllers: [PublicSitesController, AdminSitesController],
   providers: [SitesService],

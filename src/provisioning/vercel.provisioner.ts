@@ -1,5 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common'
 
+/**
+ * From a list of deployment/project aliases, pick the one most likely to be
+ * the user-facing production URL. Preference order:
+ *   1. A custom domain (anything not ending in `.vercel.app`).
+ *   2. The shortest `*.vercel.app` alias (the canonical `<project>.vercel.app`
+ *      is shorter than any per-deployment alias like `<project>-<hash>-<org>.vercel.app`).
+ */
+function pickProductionAlias(aliases?: string[]): string | undefined {
+  if (!aliases || aliases.length === 0) return undefined
+  const cleaned = aliases.filter(Boolean)
+  const custom = cleaned.find(a => !a.endsWith('.vercel.app'))
+  if (custom) return custom
+  return cleaned
+    .filter(a => a.endsWith('.vercel.app'))
+    .sort((a, b) => a.length - b.length)[0]
+}
+
 /** Thin wrapper around the Vercel REST API (https://vercel.com/docs/rest-api).
  *  Used for: create project linked to a GitHub repo, set env vars, trigger deploy,
  *  attach custom domain, verify domain. Idempotent where reasonable. */
@@ -39,7 +56,10 @@ export class VercelProvisioner {
     if (existing) {
       // Make sure settings are correct even on a pre-existing project.
       await this.configureBuildSettings(existing.id)
-      return { id: existing.id, projectName: name }
+      // Read back the authoritative name from Vercel — never trust the input name,
+      // since collisions can cause Vercel to auto-rename (e.g. "vault" → "vault-xyz").
+      const actual = await this.req<{ id: string; name: string }>('GET', `/v9/projects/${existing.id}`).catch(() => null)
+      return { id: existing.id, projectName: actual?.name ?? name }
     }
     const res = await this.req<{ id: string; name: string }>('POST', '/v10/projects', {
       name,
@@ -158,15 +178,51 @@ export class VercelProvisioner {
     return res
   }
 
-  /** Returns the stable production URL for a project (e.g. "https://my-site.vercel.app"). */
+  /**
+   * Returns the stable production URL for a project (e.g. "https://my-site.vercel.app").
+   *
+   * Strategy (most-authoritative first):
+   *  1. Fetch the latest READY production deployment and read its `alias` list. The
+   *     shortest `*.vercel.app` alias is the canonical production URL Vercel actually
+   *     serves — this catches cases where the project name we recorded doesn't match
+   *     the live alias (collisions, suffixed slugs, etc.) and stops us from pointing
+   *     users at a different team's site that happens to own `<name>.vercel.app`.
+   *  2. Fall back to the project's `targets.production.alias` list.
+   *  3. Last resort: synthesize `<projectName>.vercel.app` (legacy behaviour).
+   */
   async getProductionUrl(projectId: string): Promise<string | null> {
     if (!this.token) return null
+
+    // 1) Latest READY production deployment
     try {
-      // The project name IS the canonical subdomain — Vercel may have auto-renamed it
-      // (e.g. "mesa-site-1" → "mesa-ten"), so always read it back from the API.
-      const res = await this.req<{ name: string }>('GET', `/v9/projects/${projectId}`)
-      return `https://${res.name}.vercel.app`
-    } catch { return null }
+      const list = await this.req<{ deployments?: Array<{ uid: string; url: string; readyState?: string; state?: string }> }>(
+        'GET', `/v6/deployments?projectId=${encodeURIComponent(projectId)}&target=production&state=READY&limit=1`,
+      )
+      const latest = list.deployments?.[0]
+      if (latest?.uid) {
+        const detail = await this.req<{ alias?: string[] }>('GET', `/v13/deployments/${latest.uid}`).catch(() => null)
+        const alias = pickProductionAlias(detail?.alias)
+        if (alias) return `https://${alias}`
+        // Fall back to deployment-specific URL if no aliases are set yet
+        if (latest.url) return `https://${latest.url}`
+      }
+    } catch (e) {
+      this.logger.warn(`getProductionUrl deployments lookup: ${(e as Error).message}`)
+    }
+
+    // 2) Project targets.production.alias
+    try {
+      const proj = await this.req<{ name: string; targets?: { production?: { alias?: string[] } } }>(
+        'GET', `/v9/projects/${projectId}`,
+      )
+      const alias = pickProductionAlias(proj.targets?.production?.alias)
+      if (alias) return `https://${alias}`
+      // 3) Last resort: project name
+      if (proj.name) return `https://${proj.name}.vercel.app`
+    } catch (e) {
+      this.logger.warn(`getProductionUrl project lookup: ${(e as Error).message}`)
+    }
+    return null
   }
 
   async attachDomain(projectId: string, domain: string) {

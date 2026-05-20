@@ -159,6 +159,14 @@ export class ProvisioningProcessor extends WorkerHost {
     // Step 5 — trigger first deployment.
     await step('vercel-deploy', async () => {
       const dep = await this.vercel.triggerDeployment(project!.id, repoInfo!.repo, repoInfo!.repoId, repoInfo!.defaultBranch)
+      // Re-resolve the production URL from Vercel now that a deployment exists.
+      // The initial `<projectName>.vercel.app` guess can be wrong if Vercel routes
+      // production traffic to a different alias; the alias list on the deployment
+      // is the source of truth.
+      const resolved = await this.vercel.getProductionUrl(project!.id).catch(() => null)
+      if (resolved && resolved !== site!.vercelProductionUrl) {
+        site!.vercelProductionUrl = resolved
+      }
       site!.status = 'live'
       await em.persistAndFlush(site!)
       return dep

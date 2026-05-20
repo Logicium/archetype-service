@@ -12,6 +12,7 @@ import { GitHubProvisioner } from '../provisioning/github.provisioner'
 import { VercelProvisioner } from '../provisioning/vercel.provisioner'
 import { SITE_UPDATE_JOB, SITE_UPDATE_QUEUE } from '../provisioning/provisioning.constants'
 import { JwtAuthGuard, AuthRequest } from '../auth/jwt.guard'
+import { OrdersService } from '../orders/orders.service'
 
 /** Public read endpoint — fetched by every live archetype site at boot. */
 @ApiTags('content')
@@ -45,6 +46,7 @@ export class AdminSitesController {
     private readonly vercel: VercelProvisioner,
     @InjectQueue(SITE_UPDATE_QUEUE) private readonly updateQueue: Queue,
     private readonly screenshot: ScreenshotService,
+    private readonly orders: OrdersService,
   ) {}
 
   @Get()
@@ -164,6 +166,37 @@ export class AdminSitesController {
   }
 
   /**
+   * Force the site's linked order back into provisioning. Useful when GitHub/Vercel
+   * setup half-completed and we need a clean retry. Idempotent: existing repo/project
+   * are reused.
+   */
+  @Post(':id/reprovision')
+  async reprovision(@Param('id') id: string, @Req() req: AuthRequest) {
+    const site = await this.sites.getOwned(id, req.owner)
+    if (site.status !== 'failed' && site.status !== 'provisioning' && site.status !== 'draft') {
+      // Allow live sites too \u2014 sometimes a "live" status is wrong because vercel-deploy succeeded
+      // but the URL recorded is bogus. Reprovisioning is idempotent.
+    }
+    site.status = 'provisioning'
+    await this.sites.save(site)
+    return this.orders.reprovisionForSite(site.id, req.owner)
+  }
+
+  /** Returns Stripe session/payment-intent/event status for the order that produced this site. */
+  @Get(':id/billing-status')
+  async billingStatus(@Param('id') id: string, @Req() req: AuthRequest) {
+    const site = await this.sites.getOwned(id, req.owner)
+    return this.orders.getStripeStatusForSite(site.id, req.owner)
+  }
+
+  /** If Stripe confirms the session is paid, flip the order to paid and enqueue provisioning. */
+  @Post(':id/resolve-billing')
+  async resolveBilling(@Param('id') id: string, @Req() req: AuthRequest) {
+    const site = await this.sites.getOwned(id, req.owner)
+    return this.orders.resolveBillingForSite(site.id, req.owner)
+  }
+
+  /**
    * Returns a cached screenshot PNG of the site's production URL.
    * Always resolves the live URL from Vercel first (handles renamed projects like
    * vault-site → vault-site-ten) and invalidates the old cache key if the URL changed.
@@ -204,9 +237,14 @@ export class AdminSitesController {
     }
     if (req.query.fresh === '1') this.screenshot.invalidate(url)
     const png = await this.screenshot.capture(url)
+    // Make the browser always revalidate — the backend has its own disk cache,
+    // so revalidation is cheap, but it ensures URL changes (post-reprovision) are
+    // picked up on the next page refresh instead of serving a stale browser cache.
     res
       .set('Content-Type', 'image/png')
-      .set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400')
+      .set('Cache-Control', 'private, no-cache, no-store, must-revalidate')
+      .set('Pragma', 'no-cache')
+      .set('Expires', '0')
       .send(png)
   }
 }
