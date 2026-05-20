@@ -50,19 +50,8 @@ export class GitHubProvisioner {
   /** Writes a single file by path; creates if missing, updates if present. Idempotent. */
   async putFile(owner: string, repo: string, path: string, content: string, message = `chore: ${path}`) {
     if (!this.client) return
-    let sha: string | undefined
-    try {
-      const cur = await this.client.repos.getContent({ owner, repo, path })
-      if (!Array.isArray(cur.data) && 'sha' in cur.data) sha = cur.data.sha
-    } catch { /* new file */ }
-    await this.client.repos.createOrUpdateFileContents({
-      owner,
-      repo,
-      path,
-      message,
-      content: Buffer.from(content, 'utf8').toString('base64'),
-      sha,
-    })
+    const base64 = Buffer.from(content, 'utf8').toString('base64')
+    await this.putFileBase64(owner, repo, path, base64, message)
   }
 
   /** Returns the numeric GitHub repo ID needed for Vercel gitSource. */
@@ -111,18 +100,33 @@ export class GitHubProvisioner {
     }
   }
 
-  /** Creates or updates a file using already-base64-encoded content. */
+  /** Creates or updates a file using already-base64-encoded content.
+   *  Retries on 422 "sha wasn't supplied" — happens when GitHub's async template-repo
+   *  initialization writes the file between our getContent (404) and createOrUpdate calls. */
   async putFileBase64(owner: string, repo: string, path: string, contentBase64: string, message: string) {
     if (!this.client) return
-    let sha: string | undefined
+    const fetchSha = async (): Promise<string | undefined> => {
+      try {
+        const cur = await this.client!.repos.getContent({ owner, repo, path })
+        if (!Array.isArray(cur.data) && 'sha' in cur.data) return cur.data.sha
+      } catch { /* missing */ }
+      return undefined
+    }
+    let sha = await fetchSha()
     try {
-      const cur = await this.client.repos.getContent({ owner, repo, path })
-      if (!Array.isArray(cur.data) && 'sha' in cur.data) sha = cur.data.sha
-    } catch { /* new file */ }
-    await this.client.repos.createOrUpdateFileContents({
-      owner, repo, path, message,
-      content: contentBase64,
-      sha,
-    })
+      await this.client.repos.createOrUpdateFileContents({
+        owner, repo, path, message, content: contentBase64, sha,
+      })
+    } catch (err: unknown) {
+      const e = err as { status?: number; message?: string }
+      const isShaConflict =
+        e?.status === 422 &&
+        (e.message?.includes('sha') || e.message?.includes('does not match'))
+      if (!isShaConflict) throw err
+      sha = await fetchSha()
+      await this.client.repos.createOrUpdateFileContents({
+        owner, repo, path, message, content: contentBase64, sha,
+      })
+    }
   }
 }
