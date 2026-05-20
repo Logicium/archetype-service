@@ -44,7 +44,24 @@ export class GitHubProvisioner {
       private: false,
       include_all_branches: false,
     })
+    // createUsingTemplate returns immediately; GitHub copies the template files asynchronously.
+    // Wait until package.json exists so downstream Vercel deploys don't clone an empty repo.
+    await this.waitForFile(org, name, 'package.json')
     return { owner: org, repo: name, repoId: res.data.id, defaultBranch: res.data.default_branch ?? 'main' }
+  }
+
+  /** Polls getContent until the path exists on the default branch, or timeout. */
+  async waitForFile(owner: string, repo: string, path: string, timeoutMs = 60_000, intervalMs = 1500): Promise<void> {
+    if (!this.client) return
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      try {
+        await this.client.repos.getContent({ owner, repo, path })
+        return
+      } catch { /* not ready */ }
+      await new Promise(r => setTimeout(r, intervalMs))
+    }
+    this.logger.warn(`waitForFile timed out for ${owner}/${repo}:${path} after ${timeoutMs}ms`)
   }
 
   /** Writes a single file by path; creates if missing, updates if present. Idempotent. */

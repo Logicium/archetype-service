@@ -16,6 +16,20 @@ export interface CreateCheckoutInput {
   addOns: string[]
   wizardPayload: Record<string, unknown>
   owner: { email: string; name?: string }
+  /** Browser origin (e.g. https://app.example.com) — preferred over env defaults. */
+  origin?: string
+}
+
+/** Returns the `scheme://host[:port]` of a trusted origin, or undefined if invalid/untrusted. */
+function sanitizeOrigin(raw?: string): string | undefined {
+  if (!raw) return undefined
+  try {
+    const u = new URL(raw)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return undefined
+    return `${u.protocol}//${u.host}`
+  } catch {
+    return undefined
+  }
 }
 
 @Injectable()
@@ -65,8 +79,15 @@ export class OrdersService {
       return { orderId: order.id, checkoutUrl: null, dryRun: true }
     }
 
-    const successUrl = (process.env.STRIPE_SUCCESS_URL || 'http://localhost:5173/wizard?status=success&order={ORDER_ID}').replace('{ORDER_ID}', order.id)
-    const cancelUrl = process.env.STRIPE_CANCEL_URL || 'http://localhost:5173/wizard?status=cancelled'
+    const dynamicBase = sanitizeOrigin(input.origin)
+    const successTemplate = dynamicBase
+      ? `${dynamicBase}/wizard?status=success&order={ORDER_ID}`
+      : (process.env.STRIPE_SUCCESS_URL || 'http://localhost:5173/wizard?status=success&order={ORDER_ID}')
+    const cancelTemplate = dynamicBase
+      ? `${dynamicBase}/wizard?status=cancelled`
+      : (process.env.STRIPE_CANCEL_URL || 'http://localhost:5173/wizard?status=cancelled')
+    const successUrl = successTemplate.replace('{ORDER_ID}', order.id)
+    const cancelUrl = cancelTemplate
 
     const session = await this.stripe.checkout.sessions.create({
       mode: 'payment',

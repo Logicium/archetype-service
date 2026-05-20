@@ -25,8 +25,9 @@ export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
   @Post()
-  async create(@Body() dto: CreateOrderDto) {
-    return this.orders.createCheckoutSession(dto)
+  async create(@Body() dto: CreateOrderDto, @Req() req: Request) {
+    const origin = (req.headers.origin as string | undefined) || (req.headers.referer as string | undefined)
+    return this.orders.createCheckoutSession({ ...dto, origin })
   }
 
   @Get(':id')
