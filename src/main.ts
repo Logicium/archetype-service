@@ -28,9 +28,11 @@ async function bootstrap() {
     origin: async (origin, cb) => {
       if (!origin) return cb(null, true)
       if (allowList.includes(origin)) return cb(null, true)
+      // Always allow any Vercel preview/production URL regardless of DB state
+      if (origin.endsWith('.vercel.app')) return cb(null, true)
       try {
         const dyn = await sites.allLiveOrigins()
-        if (dyn.includes(origin) || origin.endsWith('.vercel.app')) return cb(null, true)
+        if (dyn.includes(origin)) return cb(null, true)
       } catch { /* ignore */ }
       cb(new Error(`Origin not allowed: ${origin}`), false)
     },
