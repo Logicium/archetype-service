@@ -13,6 +13,7 @@ import { VercelProvisioner } from '../provisioning/vercel.provisioner'
 import { SITE_UPDATE_JOB, SITE_UPDATE_QUEUE } from '../provisioning/provisioning.constants'
 import { JwtAuthGuard, AuthRequest } from '../auth/jwt.guard'
 import { OrdersService } from '../orders/orders.service'
+import { resolveDeployedContentApiUrl } from '../provisioning/content-api.util'
 
 /** Public read endpoint — fetched by every live archetype site at boot. */
 @ApiTags('content')
@@ -60,7 +61,7 @@ export class AdminSitesController {
       const fresh = await this.vercel.getProductionUrl(s.vercelProjectId)
       if (fresh && fresh !== s.vercelProductionUrl) {
         // Invalidate the old screenshot cache key so the next capture uses the new URL
-        if (s.vercelProductionUrl) this.screenshot.invalidate(s.vercelProductionUrl)
+        if (s.vercelProductionUrl) await this.screenshot.invalidate(s.vercelProductionUrl)
         s.vercelProductionUrl = fresh
         await this.sites.save(s)
       }
@@ -120,6 +121,17 @@ export class AdminSitesController {
     const site = await this.sites.getOwned(id, req.owner)
     if (!site.vercelProjectId) throw new Error('No Vercel project linked to this site')
     if (!site.githubRepo) throw new Error('No GitHub repo linked to this site')
+    // Re-apply the canonical env vars BEFORE triggering the deployment so changes
+    // to DEPLOYED_CONTENT_API_URL (or slug) actually take effect on the next build.
+    // setEnv PATCHes existing vars on Vercel, so this is safe to call every time.
+    try {
+      await this.vercel.setEnv(site.vercelProjectId, 'VITE_SITE_SLUG', site.slug)
+      await this.vercel.setEnv(site.vercelProjectId, 'VITE_CONTENT_API', resolveDeployedContentApiUrl())
+      await this.vercel.setEnv(site.vercelProjectId, 'VITE_PLATFORM_ENABLED', 'true')
+    } catch (e) {
+      // Surface the localhost-URL guard error clearly instead of silently shipping a broken build.
+      throw new Error(`Cannot redeploy: ${(e as Error).message}`)
+    }
     const { repoId, defaultBranch } = await this.github.getRepoInfo(site.githubRepo)
     const dep = await this.vercel.redeploy(site.vercelProjectId, site.githubRepo, repoId, defaultBranch)
     // Always refresh the stable production URL in case the stored value was a deployment-specific URL.
@@ -138,6 +150,33 @@ export class AdminSitesController {
     const site = await this.sites.getOwned(id, req.owner)
     const logs = await this.deployLogs.find({ site: site.id }, { orderBy: { createdAt: 'asc' }, limit: 100 })
     return logs.map(l => ({ step: l.step, status: l.status, message: l.message, durationMs: l.durationMs, createdAt: l.createdAt }))
+  }
+
+  /**
+   * Returns the live Vercel deployment state so the UI can render a progress
+   * indicator on the site card while a redeploy/update is in flight. If
+   * `deploymentId` is provided we ask for that exact one; otherwise we look up
+   * the latest production deployment for the linked project.
+   */
+  @Get(':id/deployment-status')
+  async deploymentStatus(
+    @Param('id') id: string,
+    @Req() req: AuthRequest & { query: { deploymentId?: string } },
+  ) {
+    const site = await this.sites.getOwned(id, req.owner)
+    if (!site.vercelProjectId) return { state: 'UNKNOWN', siteStatus: site.status }
+    const deploymentId = req.query.deploymentId
+    const dep = deploymentId
+      ? await this.vercel.getDeploymentState(deploymentId)
+      : await this.vercel.getLatestDeployment(site.vercelProjectId)
+    return {
+      state: dep?.state ?? 'UNKNOWN',
+      deploymentId: dep?.id ?? null,
+      url: dep?.url ?? null,
+      createdAt: dep?.createdAt ?? null,
+      siteStatus: site.status,
+      productionUrl: site.vercelProductionUrl ?? null,
+    }
   }
 
   /** Compares the recorded templateCommitSha against the latest commit on the template's default branch. */
@@ -219,7 +258,7 @@ export class AdminSitesController {
       const fresh = await this.vercel.getProductionUrl(site.vercelProjectId).catch(() => null)
       if (fresh) {
         if (fresh !== site.vercelProductionUrl) {
-          if (site.vercelProductionUrl) this.screenshot.invalidate(site.vercelProductionUrl)
+          if (site.vercelProductionUrl) await this.screenshot.invalidate(site.vercelProductionUrl)
           site.vercelProductionUrl = fresh
           await this.sites.save(site)
         }
@@ -235,7 +274,7 @@ export class AdminSitesController {
       res.status(404).json({ error: 'No production URL for this site' })
       return
     }
-    if (req.query.fresh === '1') this.screenshot.invalidate(url)
+    if (req.query.fresh === '1') await this.screenshot.invalidate(url)
     const png = await this.screenshot.capture(url)
     // Make the browser always revalidate — the backend has its own disk cache,
     // so revalidation is cheap, but it ensures URL changes (post-reprovision) are

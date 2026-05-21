@@ -10,6 +10,7 @@ import { GitHubProvisioner } from './github.provisioner'
 import { VercelProvisioner } from './vercel.provisioner'
 import { EmailService } from '../common/email.service'
 import { PROVISION_JOB, PROVISION_QUEUE } from './provisioning.constants'
+import { resolveDeployedContentApiUrl } from './content-api.util'
 
 @Processor(PROVISION_QUEUE)
 export class ProvisioningProcessor extends WorkerHost {
@@ -24,21 +25,11 @@ export class ProvisioningProcessor extends WorkerHost {
 
   /**
    * Returns the public URL deployed child sites should use for VITE_CONTENT_API.
-   * Prefers DEPLOYED_CONTENT_API_URL (the internet-reachable platform API — e.g.
-   * the Render URL) so local dev can keep PUBLIC_BASE_URL pointed at localhost
-   * without baking localhost into every provisioned site's .env.production.
-   * Falls back to PUBLIC_BASE_URL and throws if the resulting URL is localhost.
+   * Delegates to the shared util so the redeploy endpoint and other call-sites
+   * stay in sync with the same validation rules.
    */
   private resolveContentApiUrl(): string {
-    const override = process.env.DEPLOYED_CONTENT_API_URL?.trim()
-    const base = (override || process.env.PUBLIC_BASE_URL || '').trim().replace(/\/+$/, '')
-    if (!base) {
-      throw new Error('Cannot provision: set DEPLOYED_CONTENT_API_URL (preferred) or PUBLIC_BASE_URL to the public platform API URL.')
-    }
-    if (/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|\/|$)/i.test(base)) {
-      throw new Error(`Refusing to provision with localhost API URL (${base}). Set DEPLOYED_CONTENT_API_URL to the public platform API (e.g. your Render URL).`)
-    }
-    return base.endsWith('/v1') ? base : `${base}/v1`
+    return resolveDeployedContentApiUrl()
   }
 
   async process(job: Job<{ orderId: string }>) {

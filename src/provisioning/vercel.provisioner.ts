@@ -179,6 +179,50 @@ export class VercelProvisioner {
   }
 
   /**
+   * Returns the current state of a specific deployment so the UI can render
+   * progress (QUEUED → BUILDING → READY/ERROR/CANCELED) on a site card.
+   */
+  async getDeploymentState(deploymentId: string): Promise<{
+    id: string; state: string; readyState?: string; url?: string; createdAt?: number; ready?: number
+  } | null> {
+    if (!this.token) return null
+    try {
+      const d = await this.req<{
+        id?: string; uid?: string; url?: string; readyState?: string; state?: string;
+        createdAt?: number; ready?: number; buildingAt?: number
+      }>('GET', `/v13/deployments/${encodeURIComponent(deploymentId)}`)
+      const id = d.id || d.uid || deploymentId
+      const state = (d.readyState || d.state || 'QUEUED').toUpperCase()
+      return { id, state, readyState: d.readyState, url: d.url, createdAt: d.createdAt, ready: d.ready }
+    } catch (e) {
+      this.logger.warn(`getDeploymentState: ${(e as Error).message}`)
+      return null
+    }
+  }
+
+  /**
+   * Returns the latest production deployment for a project (any state). Useful
+   * when we don't yet know the deployment id (e.g. polling after a job-queue
+   * triggered update or a webhook-initiated build) but want progress info.
+   */
+  async getLatestDeployment(projectId: string): Promise<{
+    id: string; state: string; url?: string; createdAt?: number
+  } | null> {
+    if (!this.token) return null
+    try {
+      const list = await this.req<{ deployments?: Array<{ uid: string; url: string; readyState?: string; state?: string; createdAt?: number }> }>(
+        'GET', `/v6/deployments?projectId=${encodeURIComponent(projectId)}&target=production&limit=1`,
+      )
+      const d = list.deployments?.[0]
+      if (!d) return null
+      return { id: d.uid, state: (d.readyState || d.state || 'QUEUED').toUpperCase(), url: d.url, createdAt: d.createdAt }
+    } catch (e) {
+      this.logger.warn(`getLatestDeployment: ${(e as Error).message}`)
+      return null
+    }
+  }
+
+  /**
    * Returns the stable production URL for a project (e.g. "https://my-site.vercel.app").
    *
    * Strategy (most-authoritative first):
