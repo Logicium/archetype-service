@@ -114,10 +114,13 @@ export class ScreenshotService {
 
   private async launchBrowser() {
     if (this.useServerlessChromium) {
-      const [chromium, puppeteer] = await Promise.all([
-        import('@sparticuz/chromium').then(m => m.default),
+      const [chromiumMod, puppeteer] = await Promise.all([
+        import('@sparticuz/chromium'),
         import('puppeteer-core'),
       ])
+      // v130+ ships ESM with only named exports (no default). Fall back to the
+      // module namespace itself so both CJS-interop and ESM paths work.
+      const chromium = (chromiumMod.default ?? chromiumMod) as typeof chromiumMod
       const executablePath = await chromium.executablePath()
       return puppeteer.launch({
         args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],

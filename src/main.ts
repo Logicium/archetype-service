@@ -22,11 +22,13 @@ async function bootstrap() {
 
   // Dynamic CORS: always-allow envvar + every live custom domain / vercel URL.
   const sites = app.get(SitesService)
-  const allowList = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:4173').split(',').map(s => s.trim())
+  const allowList = (process.env.CORS_ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean)
   app.enableCors({
     credentials: true,
     origin: async (origin, cb) => {
       if (!origin) return cb(null, true)
+      // Allow all localhost origins regardless of port (local dev only).
+      if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return cb(null, true)
       if (allowList.includes(origin)) return cb(null, true)
       // Always allow any Vercel preview/production URL regardless of DB state
       if (origin.endsWith('.vercel.app')) return cb(null, true)
