@@ -113,6 +113,28 @@ export class ScreenshotService {
   }
 
   private async launchBrowser() {
+    // Flags that matter most for memory on a 512 MB container:
+    //  --single-process   : renderer runs inside the browser process (no child spawns)
+    //  --no-zygote        : disables the zygote launcher process (required with single-process)
+    //  --disable-dev-shm-usage : use /tmp instead of /dev/shm (avoids OOM on small /dev/shm)
+    //  --js-flags         : cap V8 old-space so GC runs before Linux OOM-kills the process
+    const MEMORY_FLAGS = [
+      '--single-process',
+      '--no-zygote',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-accelerated-2d-canvas',
+      '--disable-background-networking',
+      '--disable-default-apps',
+      '--disable-extensions',
+      '--disable-sync',
+      '--disable-translate',
+      '--hide-scrollbars',
+      '--disable-web-security',
+      '--js-flags=--max-old-space-size=192',
+    ]
     if (this.useServerlessChromium) {
       const [chromiumMod, puppeteer] = await Promise.all([
         import('@sparticuz/chromium'),
@@ -121,25 +143,16 @@ export class ScreenshotService {
       // v130+ ships ESM with named exports and a default export. Fall back to the
       // module namespace itself for CJS-interop builds where .default is absent.
       const chromium = (chromiumMod.default ?? chromiumMod) as typeof chromiumMod.default
+      // Disable GPU compositing pipeline to save ~50 MB on headless Linux.
+      chromium.setGraphicsMode = false
       const executablePath = await chromium.executablePath()
-      return puppeteer.launch({
-        args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
-        executablePath,
-        headless: true,
-      })
+      // chromium.args already includes Lambda/serverless defaults; we merge our
+      // memory flags and deduplicate so nothing is specified twice.
+      const args = [...new Set([...chromium.args, ...MEMORY_FLAGS])]
+      return puppeteer.launch({ args, executablePath, headless: true })
     }
     const puppeteer = await import('puppeteer')
-    return puppeteer.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--hide-scrollbars',
-        '--disable-web-security',
-      ],
-    })
+    return puppeteer.launch({ headless: true, args: MEMORY_FLAGS })
   }
 
   private async doCapture(url: string, width: number, height: number, key: string): Promise<Buffer> {
@@ -156,7 +169,7 @@ export class ScreenshotService {
       await page.setRequestInterception(true)
       page.on('request', (req) => {
         const type = req.resourceType()
-        if (type === 'media' || type === 'font') req.abort()
+        if (['media', 'font', 'websocket', 'eventsource', 'manifest'].includes(type)) req.abort()
         else req.continue()
       })
       await page.goto(url, { waitUntil: 'networkidle2', timeout: 30_000 })
