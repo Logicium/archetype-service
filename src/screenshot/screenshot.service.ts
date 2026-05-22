@@ -118,9 +118,9 @@ export class ScreenshotService {
         import('@sparticuz/chromium'),
         import('puppeteer-core'),
       ])
-      // v130+ ships ESM with only named exports (no default). Fall back to the
-      // module namespace itself so both CJS-interop and ESM paths work.
-      const chromium = (chromiumMod.default ?? chromiumMod) as typeof chromiumMod
+      // v130+ ships ESM with named exports and a default export. Fall back to the
+      // module namespace itself for CJS-interop builds where .default is absent.
+      const chromium = (chromiumMod.default ?? chromiumMod) as typeof chromiumMod.default
       const executablePath = await chromium.executablePath()
       return puppeteer.launch({
         args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
