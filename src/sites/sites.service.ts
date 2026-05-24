@@ -19,8 +19,46 @@ export class SitesService {
     return site
   }
 
-  async listForOwner(owner: Owner): Promise<Site[]> {
-    return this.sites.find({ owner: owner.id })
+  async listForOwner(owner: Owner, opts: { includeDeactivated?: boolean } = {}): Promise<Site[]> {
+    const where: Record<string, unknown> = { owner: owner.id }
+    if (!opts.includeDeactivated) where.deactivatedAt = null
+    return this.sites.find(where)
+  }
+
+  /** Rename the human-readable site label shown throughout the admin. */
+  async rename(site: Site, displayName: string): Promise<Site> {
+    const trimmed = displayName.trim()
+    site.displayName = trimmed || undefined
+    await this.em.persistAndFlush(site)
+    return site
+  }
+
+  /** Pause a site (hide from default admin list, keep Vercel + repo intact). */
+  async deactivate(site: Site): Promise<Site> {
+    if (!site.deactivatedAt) {
+      site.deactivatedAt = new Date()
+      await this.em.persistAndFlush(site)
+    }
+    return site
+  }
+
+  /** Reactivate a paused site. */
+  async activate(site: Site): Promise<Site> {
+    if (site.deactivatedAt) {
+      site.deactivatedAt = undefined
+      await this.em.persistAndFlush(site)
+    }
+    return site
+  }
+
+  /** Auto-source displayName from siteConfig.brand on first publish if not already set. */
+  async ensureDisplayNameFromPayload(site: Site, payload: Record<string, unknown> | undefined): Promise<void> {
+    if (site.displayName || !payload) return
+    const brand = (payload as { brand?: unknown }).brand
+    if (typeof brand === 'string' && brand.trim()) {
+      site.displayName = brand.trim()
+      await this.em.persistAndFlush(site)
+    }
   }
 
   async getOwned(siteId: string, owner: Owner): Promise<Site> {

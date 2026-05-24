@@ -67,4 +67,14 @@ export class AdminOrdersController {
   retry(@Param('id') id: string, @Req() req: AuthRequest) {
     return this.orders.retryProvisioning(id, req.owner)
   }
+
+  @Get(':id/billing-status')
+  billingStatus(@Param('id') id: string, @Req() req: AuthRequest) {
+    return this.orders.getStripeStatusForOrder(id, req.owner)
+  }
+
+  @Post(':id/resolve-billing')
+  resolveBilling(@Param('id') id: string, @Req() req: AuthRequest) {
+    return this.orders.resolveBillingForOrder(id, req.owner)
+  }
 }

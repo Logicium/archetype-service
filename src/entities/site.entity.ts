@@ -19,6 +19,16 @@ export class Site {
   @Unique()
   slug!: string
 
+  /** Human-readable site name shown in the admin (e.g. the business name).
+   *  Auto-sourced from siteConfig.brand on first publish if not set, then editable. */
+  @Property({ nullable: true })
+  displayName?: string
+
+  /** When set, the site is hidden from the default admin list and considered
+   *  paused. The Vercel project and GitHub repo are left intact. */
+  @Property({ nullable: true })
+  deactivatedAt?: Date
+
   @Enum({ items: () => ['mesa', 'hearth', 'vault', 'keystone'] as ArchetypeKind[] })
   archetype!: ArchetypeKind
 

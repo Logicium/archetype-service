@@ -25,7 +25,7 @@ export class AiController {
     const sys = `You write tight, warm marketing copy for small Trinidad, Colorado businesses. Respond with 3 distinct options separated by "---". Stay under 60 words per option for blurbs, under 12 for taglines. Output only the options, nothing else.`
     const user = `Field: ${dto.field}\nBrief: ${dto.prompt}\nKnown site context: ${JSON.stringify(dto.context ?? {}, null, 2).slice(0, 2000)}`
     const model = this.gemini.getGenerativeModel({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.5-flash',
       systemInstruction: sys,
       generationConfig: { temperature: 0.8 },
     })

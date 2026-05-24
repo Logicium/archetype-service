@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Header, Injectable, Logger, Param, Post, Req, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, Header, Injectable, Logger, Param, Post, Query, Req, UseGuards } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import { InjectRepository } from '@mikro-orm/nestjs'
 import { EntityManager, EntityRepository } from '@mikro-orm/postgresql'
@@ -61,6 +61,59 @@ export class ReviewsService {
       if (s.googlePlaceId) await this.fetchForSite(s, em)
     }
   }
+
+  /** Text search for businesses on Google Places. Returns lightweight candidates. */
+  async searchPlaces(query: string) {
+    const key = process.env.GOOGLE_PLACES_API_KEY
+    if (!key) return []
+    try {
+      const res = await this.gmaps.textSearch({ params: { query, key } })
+      return (res.data.results ?? []).slice(0, 8).map(r => ({
+        placeId: r.place_id ?? '',
+        name: r.name ?? '',
+        address: r.formatted_address ?? '',
+        rating: r.rating ?? null,
+        totalRatings: r.user_ratings_total ?? null,
+      })).filter(r => r.placeId)
+    } catch (e) {
+      this.logger.warn(`Places search failed for "${query}": ${(e as Error).message}`)
+      return []
+    }
+  }
+
+  /** Lightweight place details for the picker preview (no DB writes). */
+  async placePreview(placeId: string) {
+    const key = process.env.GOOGLE_PLACES_API_KEY
+    if (!key) return null
+    try {
+      const res = await this.gmaps.placeDetails({
+        params: {
+          place_id: placeId,
+          fields: ['name', 'formatted_address', 'rating', 'user_ratings_total', 'url', 'reviews'],
+          key,
+        },
+      })
+      const r = res.data.result
+      return {
+        placeId,
+        name: r.name ?? '',
+        address: r.formatted_address ?? '',
+        rating: r.rating ?? null,
+        totalRatings: r.user_ratings_total ?? null,
+        url: r.url ?? null,
+        reviews: (r.reviews ?? []).slice(0, 5).map(rv => ({
+          author: rv.author_name ?? 'Anonymous',
+          rating: rv.rating ?? 5,
+          text: rv.text ?? '',
+          time: rv.time ?? 0,
+          relativeTime: rv.relative_time_description ?? '',
+        })),
+      }
+    } catch (e) {
+      this.logger.warn(`Place preview failed for ${placeId}: ${(e as Error).message}`)
+      return null
+    }
+  }
 }
 
 @ApiTags('reviews')
@@ -92,21 +145,53 @@ export class AdminReviewsController {
     private readonly reviewsSvc: ReviewsService,
   ) {}
 
+  @Get(':id/google-place')
+  async getPlace(@Param('id') id: string, @Req() req: AuthRequest) {
+    const site = await this.sites.getOwned(id, req.owner)
+    if (!site.googlePlaceId) return { placeId: null, preview: null }
+    const preview = await this.reviewsSvc.placePreview(site.googlePlaceId).catch(() => null)
+    return { placeId: site.googlePlaceId, preview }
+  }
+
   @Post(':id/google-place')
   async setPlaceId(@Param('id') id: string, @Req() req: AuthRequest, @Body() body: { placeId: string }) {
     const site = await this.sites.getOwned(id, req.owner)
     site.googlePlaceId = body.placeId
     await this.em.persistAndFlush(site)
     await this.reviewsSvc.fetchForSite(site)
+    const preview = await this.reviewsSvc.placePreview(body.placeId).catch(() => null)
+    return { ok: true, placeId: body.placeId, preview }
+  }
+
+  @Post(':id/google-place/disconnect')
+  async clearPlace(@Param('id') id: string, @Req() req: AuthRequest) {
+    const site = await this.sites.getOwned(id, req.owner)
+    site.googlePlaceId = undefined
+    await this.em.persistAndFlush(site)
     return { ok: true }
   }
 
-  @Post(':id/reviews/manual')
-  async addManual(@Param('id') id: string, @Req() req: AuthRequest, @Body() body: { author: string; rating: number; text: string }) {
+  @Get(':id/google-places/search')
+  async searchPlaces(@Param('id') id: string, @Req() req: AuthRequest, @Query('q') q: string) {
+    await this.sites.getOwned(id, req.owner)
+    if (!q || q.trim().length < 2) return { results: [] }
+    return { results: await this.reviewsSvc.searchPlaces(q.trim()) }
+  }
+
+  @Get(':id/reviews')
+  async listReviews(@Param('id') id: string, @Req() req: AuthRequest) {
     const site = await this.sites.getOwned(id, req.owner)
-    if (!body.author || !body.text) throw new BadRequestException('author + text required')
-    const r = this.reviews.create({ site, source: 'manual', author: body.author, rating: body.rating ?? 5, text: body.text })
-    await this.em.persistAndFlush(r)
-    return { id: r.id }
+    const rows = await this.reviews.find(
+      { site: site.id },
+      { orderBy: { fetchedAt: 'desc' }, limit: 25 },
+    )
+    return rows.map(r => ({
+      id: r.id,
+      rating: r.rating,
+      author: r.author,
+      text: r.text,
+      source: r.source,
+      fetchedAt: r.fetchedAt,
+    }))
   }
 }

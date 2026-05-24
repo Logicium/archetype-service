@@ -215,6 +215,25 @@ export class OrdersService {
     return order
   }
 
+  /** Find an order by id (scoped to owner). */
+  async findOwned(orderId: string, owner: Owner): Promise<Order> {
+    const order = await this.orders.findOne({ id: orderId, owner: owner.id }, { populate: ['owner'] as never })
+    if (!order) throw new NotFoundException('Order not found')
+    return order
+  }
+
+  /** Order-level Stripe diagnostic — works even when the order never produced a site. */
+  async getStripeStatusForOrder(orderId: string, owner: Owner) {
+    const order = await this.findOwned(orderId, owner)
+    return this.buildStripeStatus(order)
+  }
+
+  /** Order-level resolve — for pending orders whose webhook never landed. */
+  async resolveBillingForOrder(orderId: string, owner: Owner) {
+    const order = await this.findOwned(orderId, owner)
+    return this.resolveAndEnqueue(order)
+  }
+
   /**
    * Force-reprovision a stuck site: resets the order back to `paid` and re-enqueues
    * the provisioning job. Idempotent steps in the processor (createRepo, createProject,
@@ -242,6 +261,10 @@ export class OrdersService {
   /** If Stripe confirms the session was paid but the order never flipped, mark paid + enqueue. */
   async resolveBillingForSite(siteId: string, owner: Owner) {
     const order = await this.findBySiteId(siteId, owner)
+    return this.resolveAndEnqueue(order)
+  }
+
+  private async resolveAndEnqueue(order: Order) {
     if (!this.stripe) throw new BadRequestException('Stripe not configured')
     if (!order.stripeSessionId) throw new BadRequestException('Order has no Stripe session')
     const session = await this.stripe.checkout.sessions.retrieve(order.stripeSessionId)

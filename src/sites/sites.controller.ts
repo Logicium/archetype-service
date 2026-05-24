@@ -51,8 +51,9 @@ export class AdminSitesController {
   ) {}
 
   @Get()
-  async list(@Req() req: AuthRequest) {
-    const sites = await this.sites.listForOwner(req.owner)
+  async list(@Req() req: AuthRequest & { query: { includeDeactivated?: string } }) {
+    const includeDeactivated = req.query?.includeDeactivated === '1' || req.query?.includeDeactivated === 'true'
+    const sites = await this.sites.listForOwner(req.owner, { includeDeactivated })
     // Resolve production URLs from Vercel in parallel so the admin always shows the real URL
     // (Vercel may have auto-renamed the project, e.g. "mesa-site" → "mesa-site-pied").
     // The result is persisted as a side-effect so subsequent loads are already accurate.
@@ -69,10 +70,12 @@ export class AdminSitesController {
     return sites.map(s => ({
       id: s.id,
       slug: s.slug,
+      displayName: s.displayName ?? null,
       archetype: s.archetype,
       status: s.status,
       productionUrl: s.customDomain ? `https://${s.customDomain}` : s.vercelProductionUrl,
       customDomain: s.customDomain,
+      deactivatedAt: s.deactivatedAt ?? null,
     }))
   }
 
@@ -99,6 +102,7 @@ export class AdminSitesController {
   async publish(@Param('id') id: string, @Req() req: AuthRequest, @Body() body: { payload?: Record<string, unknown> }) {
     const site = await this.sites.getOwned(id, req.owner)
     const row = await this.sites.publish(site, body.payload)
+    await this.sites.ensureDisplayNameFromPayload(site, body.payload ?? row.payload as Record<string, unknown>)
     return { version: row.version, publishedAt: row.publishedAt }
   }
 
@@ -233,6 +237,30 @@ export class AdminSitesController {
   async resolveBilling(@Param('id') id: string, @Req() req: AuthRequest) {
     const site = await this.sites.getOwned(id, req.owner)
     return this.orders.resolveBillingForSite(site.id, req.owner)
+  }
+
+  /** Rename a site (display label only — slug stays stable). */
+  @Put(':id')
+  async rename(@Param('id') id: string, @Req() req: AuthRequest, @Body() body: { displayName?: string }) {
+    const site = await this.sites.getOwned(id, req.owner)
+    const next = await this.sites.rename(site, body.displayName ?? '')
+    return { id: next.id, displayName: next.displayName ?? null }
+  }
+
+  /** Pause a site — hides from default admin list. Vercel + repo are kept intact. */
+  @Post(':id/deactivate')
+  async deactivate(@Param('id') id: string, @Req() req: AuthRequest) {
+    const site = await this.sites.getOwned(id, req.owner)
+    const next = await this.sites.deactivate(site)
+    return { id: next.id, deactivatedAt: next.deactivatedAt }
+  }
+
+  /** Reactivate a paused site. */
+  @Post(':id/activate')
+  async activate(@Param('id') id: string, @Req() req: AuthRequest) {
+    const site = await this.sites.getOwned(id, req.owner)
+    const next = await this.sites.activate(site)
+    return { id: next.id, deactivatedAt: next.deactivatedAt ?? null }
   }
 
   /**
