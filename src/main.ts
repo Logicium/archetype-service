@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import { NestFactory } from '@nestjs/core'
 import { ValidationPipe } from '@nestjs/common'
+import { NestExpressApplication } from '@nestjs/platform-express'
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger'
 import { MikroORM } from '@mikro-orm/core'
 import helmet from 'helmet'
@@ -9,7 +10,7 @@ import { AppModule } from './app.module'
 import { SitesService } from './sites/sites.service'
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { rawBody: true })
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true })
 
   // Ensure the dedicated Postgres schema exists before any query runs.
   // Lets us safely share a database with sibling services (e.g. apotome-labs).
@@ -19,6 +20,11 @@ async function bootstrap() {
 
   app.use(helmet({ contentSecurityPolicy: false }))
   app.use(cookieParser())
+
+  // Image uploads from the admin panel send base64-encoded photos in JSON.
+  // The default 100kb limit rejects anything larger than a thumbnail.
+  app.useBodyParser('json', { limit: '25mb' })
+  app.useBodyParser('urlencoded', { limit: '25mb', extended: true })
 
   // Dynamic CORS: always-allow envvar + every live custom domain / vercel URL.
   const sites = app.get(SitesService)

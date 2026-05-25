@@ -38,7 +38,7 @@ export class FormsController {
     }
     // TODO: verify hCaptcha server-side when HCAPTCHA_SECRET is set.
 
-    const site = await this.sites.findBySlug(slug)
+    const site = await this.sites.findByIdOrSlug(key)
     const row = this.subs.create({
       site,
       type: dto.type,
