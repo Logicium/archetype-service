@@ -22,10 +22,10 @@ export class PublicInstagramController {
     private readonly sitesSvc: SitesService,
   ) {}
 
-  @Get(':slug/instagram')
+  @Get(':key/instagram')
   @Header('Cache-Control', 'public, max-age=900, s-maxage=900, stale-while-revalidate=3600')
-  async list(@Param('slug') slug: string) {
-    const site = await this.sitesSvc.findBySlug(slug)
+  async list(@Param('key') key: string) {
+    const site = await this.sitesSvc.findByIdOrSlug(key)
     if (!site.instagramToken) return { media: [] }
     try {
       const url = `https://graph.instagram.com/me/media?fields=id,media_type,media_url,permalink,caption,timestamp&access_token=${site.instagramToken}&limit=12`

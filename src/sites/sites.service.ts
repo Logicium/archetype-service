@@ -19,6 +19,21 @@ export class SitesService {
     return site
   }
 
+  /**
+   * Public lookup that accepts either a UUID (preferred — immutable, set at
+   * provision time as `VITE_SITE_ID`) or a slug (legacy — still used by older
+   * deployments before the ID switchover). UUID is detected by canonical
+   * 8-4-4-4-12 hex format; anything else is treated as a slug.
+   */
+  async findByIdOrSlug(key: string): Promise<Site> {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)
+    const site = isUuid
+      ? await this.sites.findOne({ id: key })
+      : await this.sites.findOne({ slug: key })
+    if (!site) throw new NotFoundException('Site not found')
+    return site
+  }
+
   async listForOwner(owner: Owner, opts: { includeDeactivated?: boolean } = {}): Promise<Site[]> {
     const where: Record<string, unknown> = { owner: owner.id }
     if (!opts.includeDeactivated) where.deactivatedAt = null

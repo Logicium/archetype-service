@@ -123,6 +123,7 @@ export class ProvisioningProcessor extends WorkerHost {
       // Runtime env so the deployed UI talks to this API server.
       const contentApi = this.resolveContentApiUrl()
       const envContent = [
+        `VITE_SITE_ID=${site!.id}`,
         `VITE_SITE_SLUG=${site!.slug}`,
         `VITE_CONTENT_API=${contentApi}`,
         `VITE_PLATFORM_ENABLED=true`,
@@ -165,6 +166,7 @@ export class ProvisioningProcessor extends WorkerHost {
       // Vercel may rename the project if the slug collides (e.g. "mesa-site-1" → "mesa-ten").
       site!.vercelProductionUrl = `https://${proj.projectName}.vercel.app`
       await em.persistAndFlush(site!)
+      await this.vercel.setEnv(proj.id, 'VITE_SITE_ID', site!.id)
       await this.vercel.setEnv(proj.id, 'VITE_SITE_SLUG', site!.slug)
       await this.vercel.setEnv(proj.id, 'VITE_CONTENT_API', this.resolveContentApiUrl())
       await this.vercel.setEnv(proj.id, 'VITE_PLATFORM_ENABLED', 'true')

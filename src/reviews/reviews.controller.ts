@@ -124,10 +124,10 @@ export class PublicReviewsController {
     private readonly sites: SitesService,
   ) {}
 
-  @Get(':slug/reviews')
+  @Get(':key/reviews')
   @Header('Cache-Control', 'public, max-age=300, s-maxage=300, stale-while-revalidate=900')
-  async list(@Param('slug') slug: string) {
-    const site = await this.sites.findBySlug(slug)
+  async list(@Param('key') key: string) {
+    const site = await this.sites.findByIdOrSlug(key)
     const rows = await this.reviews.find({ site: site.id, visible: true }, { orderBy: { fetchedAt: 'desc' }, limit: 20 })
     return rows.map(r => ({ rating: r.rating, author: r.author, text: r.text, source: r.source, fetchedAt: r.fetchedAt }))
   }

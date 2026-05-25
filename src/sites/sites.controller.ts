@@ -21,10 +21,10 @@ import { resolveDeployedContentApiUrl } from '../provisioning/content-api.util'
 export class PublicSitesController {
   constructor(private readonly sites: SitesService) {}
 
-  @Get(':slug/content')
+  @Get(':key/content')
   @Header('Cache-Control', 'public, max-age=60, s-maxage=60, stale-while-revalidate=300')
-  async getContent(@Param('slug') slug: string) {
-    const site = await this.sites.findBySlug(slug)
+  async getContent(@Param('key') key: string) {
+    const site = await this.sites.findByIdOrSlug(key)
     const content = await this.sites.getPublishedContent(site.id)
     return {
       slug: site.slug,
@@ -129,6 +129,7 @@ export class AdminSitesController {
     // to DEPLOYED_CONTENT_API_URL (or slug) actually take effect on the next build.
     // setEnv PATCHes existing vars on Vercel, so this is safe to call every time.
     try {
+      await this.vercel.setEnv(site.vercelProjectId, 'VITE_SITE_ID', site.id)
       await this.vercel.setEnv(site.vercelProjectId, 'VITE_SITE_SLUG', site.slug)
       await this.vercel.setEnv(site.vercelProjectId, 'VITE_CONTENT_API', resolveDeployedContentApiUrl())
       await this.vercel.setEnv(site.vercelProjectId, 'VITE_PLATFORM_ENABLED', 'true')

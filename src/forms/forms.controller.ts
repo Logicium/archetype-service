@@ -27,8 +27,8 @@ export class FormsController {
   ) {}
 
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
-  @Post(':slug/submissions')
-  async submit(@Param('slug') slug: string, @Body() dto: SubmitDto, @Ip() ip: string, @Headers('user-agent') ua?: string) {
+  @Post(':key/submissions')
+  async submit(@Param('key') key: string, @Body() dto: SubmitDto, @Ip() ip: string, @Headers('user-agent') ua?: string) {
     if (dto.hp && dto.hp.length > 0) {
       // Honeypot — pretend success.
       return { ok: true }
