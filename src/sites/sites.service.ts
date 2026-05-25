@@ -4,6 +4,7 @@ import { EntityManager, EntityRepository } from '@mikro-orm/postgresql'
 import { Site } from '../entities/site.entity'
 import { SiteContent } from '../entities/site-content.entity'
 import { Owner } from '../entities/owner.entity'
+import { diffContent, type ContentDiff } from './content-diff.util'
 
 @Injectable()
 export class SitesService {
@@ -140,6 +141,21 @@ export class SitesService {
 
   async listVersions(site: Site): Promise<SiteContent[]> {
     return this.contents.find({ site: site.id }, { orderBy: { version: 'desc' }, limit: 50 })
+  }
+
+  /**
+   * Returns the same versions as `listVersions`, paired with a summary of
+   * what changed compared to the previous version. The oldest entry has an
+   * empty diff (no predecessor).
+   */
+  async listVersionsWithDiff(site: Site): Promise<Array<SiteContent & { changes: ContentDiff }>> {
+    const rows = await this.listVersions(site)
+    // rows are newest-first; predecessor of rows[i] is rows[i + 1].
+    return rows.map((row, i) => {
+      const prev = rows[i + 1]
+      const changes = prev ? diffContent(prev.payload, row.payload) : { paths: [], count: 0 }
+      return Object.assign(row, { changes })
+    })
   }
 
   async restoreVersion(site: Site, version: number): Promise<SiteContent> {

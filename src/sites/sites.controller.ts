@@ -109,8 +109,14 @@ export class AdminSitesController {
   @Get(':id/content/versions')
   async versions(@Param('id') id: string, @Req() req: AuthRequest) {
     const site = await this.sites.getOwned(id, req.owner)
-    const rows = await this.sites.listVersions(site)
-    return rows.map(r => ({ version: r.version, published: r.published, publishedAt: r.publishedAt, createdAt: r.createdAt }))
+    const rows = await this.sites.listVersionsWithDiff(site)
+    return rows.map(r => ({
+      version: r.version,
+      published: r.published,
+      publishedAt: r.publishedAt,
+      createdAt: r.createdAt,
+      changes: r.changes,
+    }))
   }
 
   @Post(':id/content/versions/:version/restore')
