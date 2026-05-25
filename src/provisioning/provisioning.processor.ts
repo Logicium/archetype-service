@@ -11,6 +11,7 @@ import { VercelProvisioner } from './vercel.provisioner'
 import { EmailService } from '../common/email.service'
 import { PROVISION_JOB, PROVISION_QUEUE } from './provisioning.constants'
 import { resolveDeployedContentApiUrl } from './content-api.util'
+import { normalizeWizardPayload } from './wizard-payload.util'
 
 @Processor(PROVISION_QUEUE)
 export class ProvisioningProcessor extends WorkerHost {
@@ -48,7 +49,10 @@ export class ProvisioningProcessor extends WorkerHost {
     await em.persistAndFlush(order)
 
     let site: Site | null = order.siteId ? await sites.findOne({ id: order.siteId }) : null
-    const wp = order.wizardPayload as { desiredSlug?: string; config?: Record<string, unknown> }
+    // The wizard UI posts a flat form as wizardPayload; normalize to { desiredSlug, config }
+    // so the rest of the pipeline (slug derivation, seed-content, .env.production, tenant.config.json)
+    // sees a stable SiteContent-shaped payload regardless of which client version submitted it.
+    const wp = normalizeWizardPayload(order.wizardPayload, order.archetype as 'mesa' | 'hearth' | 'vault' | 'keystone')
 
     /** Helper: run a step, log success/failure, rethrow on failure. */
     const step = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
