@@ -114,6 +114,25 @@ export class ReviewsService {
       return null
     }
   }
+
+  /**
+   * Server-side geocoding for the admin's address picker so the Google Maps
+   * key never ships to the browser. Returns up to 5 candidates.
+   */
+  async geocode(query: string) {
+    const key = process.env.GOOGLE_PLACES_API_KEY
+    if (!key) return []
+    try {
+      const res = await this.gmaps.geocode({ params: { address: query, key } })
+      return (res.data.results ?? []).slice(0, 5).map(r => ({
+        placeId: r.place_id,
+        address: r.formatted_address,
+      }))
+    } catch (e) {
+      this.logger.warn(`Geocode failed for "${query}": ${(e as Error).message}`)
+      return []
+    }
+  }
 }
 
 @ApiTags('reviews')
@@ -156,7 +175,13 @@ export class AdminReviewsController {
   @Post(':id/google-place')
   async setPlaceId(@Param('id') id: string, @Req() req: AuthRequest, @Body() body: { placeId: string }) {
     const site = await this.sites.getOwned(id, req.owner)
+    const previous = site.googlePlaceId
     site.googlePlaceId = body.placeId
+    // Clear cached reviews from any previously-connected business so the
+    // admin / public site never show stale or unrelated reviews.
+    if (previous && previous !== body.placeId) {
+      await this.em.nativeDelete(Review, { site: site.id, source: 'google' })
+    }
     await this.em.persistAndFlush(site)
     await this.reviewsSvc.fetchForSite(site)
     const preview = await this.reviewsSvc.placePreview(body.placeId).catch(() => null)
@@ -167,6 +192,8 @@ export class AdminReviewsController {
   async clearPlace(@Param('id') id: string, @Req() req: AuthRequest) {
     const site = await this.sites.getOwned(id, req.owner)
     site.googlePlaceId = undefined
+    // Wipe cached Google reviews so the public site stops showing them.
+    await this.em.nativeDelete(Review, { site: site.id, source: 'google' })
     await this.em.persistAndFlush(site)
     return { ok: true }
   }
@@ -176,6 +203,13 @@ export class AdminReviewsController {
     await this.sites.getOwned(id, req.owner)
     if (!q || q.trim().length < 2) return { results: [] }
     return { results: await this.reviewsSvc.searchPlaces(q.trim()) }
+  }
+
+  @Get(':id/geocode')
+  async geocode(@Param('id') id: string, @Req() req: AuthRequest, @Query('q') q: string) {
+    await this.sites.getOwned(id, req.owner)
+    if (!q || q.trim().length < 3) return { results: [] }
+    return { results: await this.reviewsSvc.geocode(q.trim()) }
   }
 
   @Get(':id/reviews')
