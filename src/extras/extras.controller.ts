@@ -48,7 +48,7 @@ export class MediaController {
     if (!process.env.BLOB_READ_WRITE_TOKEN) throw new BadRequestException('Media uploads not configured')
     if (!body.base64) throw new BadRequestException('Missing base64')
     const buf = Buffer.from(body.base64, 'base64')
-    if (buf.length > 8 * 1024 * 1024) throw new BadRequestException('Max 8MB')
+    if (buf.length > 25 * 1024 * 1024) throw new BadRequestException('Max 25MB')
     const key = `sites/${site.slug}/${Date.now()}-${body.filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`
     const blob = await put(key, buf, { access: 'public', contentType: body.contentType, token: process.env.BLOB_READ_WRITE_TOKEN })
     return { url: blob.url }
