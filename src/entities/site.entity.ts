@@ -70,6 +70,18 @@ export class Site {
   @Property({ nullable: true })
   instagramTokenExpiresAt?: Date
 
+  /** Public Vercel Blob URL of the most recent site screenshot, or null if never captured. */
+  @Property({ nullable: true })
+  screenshotUrl?: string
+
+  /** When the current screenshot was captured. Used to display "X days ago" and decide staleness. */
+  @Property({ nullable: true })
+  screenshotCapturedAt?: Date
+
+  /** Production URL the current screenshot was taken of. Lets us detect URL drift cheaply. */
+  @Property({ nullable: true })
+  screenshotSourceUrl?: string
+
   @Property({ defaultRaw: 'NOW()' })
   createdAt: Date = new Date()
 

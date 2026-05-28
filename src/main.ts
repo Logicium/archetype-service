@@ -18,6 +18,14 @@ async function bootstrap() {
   const schema = process.env.DB_SCHEMA || 'archetype'
   await orm.em.getConnection().execute(`CREATE SCHEMA IF NOT EXISTS "${schema}"`)
 
+  // Idempotent column adds for entity fields introduced after initial schema
+  // create. Cheap on every boot, avoids needing a full migration runner.
+  await orm.em.getConnection().execute(`
+    ALTER TABLE "${schema}"."site" ADD COLUMN IF NOT EXISTS "screenshot_url" varchar(255) NULL;
+    ALTER TABLE "${schema}"."site" ADD COLUMN IF NOT EXISTS "screenshot_captured_at" timestamptz NULL;
+    ALTER TABLE "${schema}"."site" ADD COLUMN IF NOT EXISTS "screenshot_source_url" varchar(255) NULL;
+  `)
+
   app.use(helmet({ contentSecurityPolicy: false }))
   app.use(cookieParser())
 

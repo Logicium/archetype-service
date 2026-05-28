@@ -1,5 +1,4 @@
-import { Body, Controller, Get, Header, Param, Post, Put, Req, Res, UseGuards } from '@nestjs/common'
-import type { Response } from 'express'
+import { Body, Controller, Get, Header, Param, Post, Put, Req, UseGuards } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import { InjectRepository } from '@mikro-orm/nestjs'
 import { EntityRepository } from '@mikro-orm/postgresql'
@@ -8,12 +7,22 @@ import { Queue } from 'bullmq'
 import { SitesService } from './sites.service'
 import { ScreenshotService } from '../screenshot/screenshot.service'
 import { DeployLog } from '../entities/misc.entity'
+import { Site } from '../entities/site.entity'
 import { GitHubProvisioner } from '../provisioning/github.provisioner'
 import { VercelProvisioner } from '../provisioning/vercel.provisioner'
 import { SITE_UPDATE_JOB, SITE_UPDATE_QUEUE } from '../provisioning/provisioning.constants'
 import { JwtAuthGuard, AuthRequest } from '../auth/jwt.guard'
 import { OrdersService } from '../orders/orders.service'
 import { resolveDeployedContentApiUrl } from '../provisioning/content-api.util'
+
+/**
+ * Screenshots are recaptured automatically when the persisted one is older than
+ * this threshold. The list endpoint enqueues a background capture if any live
+ * site's `screenshotCapturedAt` predates this window. Override with
+ * SCREENSHOT_STALE_AFTER_DAYS.
+ */
+const SCREENSHOT_STALE_AFTER_MS =
+  Number(process.env.SCREENSHOT_STALE_AFTER_DAYS ?? 14) * 24 * 60 * 60 * 1_000
 
 /** Public read endpoint — fetched by every live archetype site at boot. */
 @ApiTags('content')
@@ -54,19 +63,18 @@ export class AdminSitesController {
   async list(@Req() req: AuthRequest & { query: { includeDeactivated?: string } }) {
     const includeDeactivated = req.query?.includeDeactivated === '1' || req.query?.includeDeactivated === 'true'
     const sites = await this.sites.listForOwner(req.owner, { includeDeactivated })
-    // Resolve production URLs from Vercel in parallel so the admin always shows the real URL
-    // (Vercel may have auto-renamed the project, e.g. "mesa-site" → "mesa-site-pied").
-    // The result is persisted as a side-effect so subsequent loads are already accurate.
-    await Promise.all(sites.map(async s => {
-      if (!s.vercelProjectId) return
-      const fresh = await this.vercel.getProductionUrl(s.vercelProjectId)
-      if (fresh && fresh !== s.vercelProductionUrl) {
-        // Invalidate the old screenshot cache key so the next capture uses the new URL
-        if (s.vercelProductionUrl) await this.screenshot.invalidate(s.vercelProductionUrl)
-        s.vercelProductionUrl = fresh
-        await this.sites.save(s)
+    // Stale-screenshot sweep: any live site whose screenshot is missing or
+    // older than STALE_AFTER_MS gets a background capture queued. Fire-and-forget
+    // so the list response isn't blocked by Puppeteer. Inflight dedup in the
+    // service prevents duplicate captures if list() is called repeatedly.
+    for (const s of sites) {
+      const url = s.customDomain ? `https://${s.customDomain}` : s.vercelProductionUrl
+      if (!url) continue
+      const urlDrifted = s.screenshotSourceUrl != null && s.screenshotSourceUrl !== url
+      if (!s.screenshotUrl || urlDrifted || this.screenshot.isStale(s, SCREENSHOT_STALE_AFTER_MS)) {
+        void this.captureInBackground(s, url)
       }
-    }))
+    }
     return sites.map(s => ({
       id: s.id,
       slug: s.slug,
@@ -76,6 +84,8 @@ export class AdminSitesController {
       productionUrl: s.customDomain ? `https://${s.customDomain}` : s.vercelProductionUrl,
       customDomain: s.customDomain,
       deactivatedAt: s.deactivatedAt ?? null,
+      screenshotUrl: s.screenshotUrl ?? null,
+      screenshotCapturedAt: s.screenshotCapturedAt ?? null,
     }))
   }
 
@@ -271,54 +281,74 @@ export class AdminSitesController {
   }
 
   /**
-   * Returns a cached screenshot PNG of the site's production URL.
-   * Always resolves the live URL from Vercel first (handles renamed projects like
-   * vault-site → vault-site-ten) and invalidates the old cache key if the URL changed.
-   * Accepts ?fresh=1 to force a new capture of the current URL.
+   * Returns the persisted screenshot metadata for a site. The frontend uses the
+   * `url` directly as an <img src> (it's a public Vercel Blob URL), so this
+   * endpoint never streams PNG bytes through Node. Returns `{url: null}` when
+   * no screenshot has been captured yet.
+   *
+   * This endpoint does NOT trigger captures. To force a new screenshot, POST
+   * `/admin/sites/:id/screenshot/refresh`.
    */
   @Get(':id/screenshot')
-  async getScreenshot(
-    @Param('id') id: string,
-    @Req() req: AuthRequest & { query: { fresh?: string } },
-    @Res() res: Response,
-  ) {
+  async getScreenshot(@Param('id') id: string, @Req() req: AuthRequest) {
     const site = await this.sites.getOwned(id, req.owner)
-
-    // Resolve the authoritative production URL — always ask Vercel so renamed
-    // projects (e.g. mesa-site → mesa-site-pied) are caught immediately.
-    let url: string | undefined
-    if (site.customDomain) {
-      url = `https://${site.customDomain}`
-    } else if (site.vercelProjectId) {
-      const fresh = await this.vercel.getProductionUrl(site.vercelProjectId).catch(() => null)
-      if (fresh) {
-        if (fresh !== site.vercelProductionUrl) {
-          if (site.vercelProductionUrl) await this.screenshot.invalidate(site.vercelProductionUrl)
-          site.vercelProductionUrl = fresh
-          await this.sites.save(site)
-        }
-        url = fresh
-      } else {
-        url = site.vercelProductionUrl
-      }
-    } else {
-      url = site.vercelProductionUrl
+    return {
+      url: site.screenshotUrl ?? null,
+      capturedAt: site.screenshotCapturedAt ?? null,
+      sourceUrl: site.screenshotSourceUrl ?? null,
     }
+  }
 
+  /**
+   * Captures a fresh screenshot of the site's current production URL and
+   * persists the resulting public Blob URL on the Site entity. Resolves the
+   * live URL from Vercel first so renamed projects are caught immediately.
+   * Returns the same shape as GET /screenshot.
+   */
+  @Post(':id/screenshot/refresh')
+  async refreshScreenshot(@Param('id') id: string, @Req() req: AuthRequest) {
+    const site = await this.sites.getOwned(id, req.owner)
+    const url = await this.resolveLiveUrl(site)
     if (!url) {
-      res.status(404).json({ error: 'No production URL for this site' })
-      return
+      return { url: null, capturedAt: null, sourceUrl: null, error: 'No production URL for this site' }
     }
-    if (req.query.fresh === '1') await this.screenshot.invalidate(url)
-    const png = await this.screenshot.capture(url)
-    // Make the browser always revalidate — the backend has its own disk cache,
-    // so revalidation is cheap, but it ensures URL changes (post-reprovision) are
-    // picked up on the next page refresh instead of serving a stale browser cache.
-    res
-      .set('Content-Type', 'image/png')
-      .set('Cache-Control', 'private, no-cache, no-store, must-revalidate')
-      .set('Pragma', 'no-cache')
-      .set('Expires', '0')
-      .send(png)
+    await this.screenshot.captureForSite(site, url)
+    await this.sites.save(site)
+    return {
+      url: site.screenshotUrl ?? null,
+      capturedAt: site.screenshotCapturedAt ?? null,
+      sourceUrl: site.screenshotSourceUrl ?? null,
+    }
+  }
+
+  /**
+   * Best-effort background capture used by `list()` for stale/missing
+   * screenshots. Loads a fresh entity reference so we flush only the
+   * screenshot fields; any error is swallowed (logged) since this is
+   * fire-and-forget.
+   */
+  private async captureInBackground(site: Site, url: string): Promise<void> {
+    try {
+      await this.screenshot.captureForSite(site, url)
+      await this.sites.save(site)
+    } catch {
+      // Logged inside ScreenshotService; nothing the list response can do.
+    }
+  }
+
+  /**
+   * Resolves the authoritative production URL for a site. Custom domain takes
+   * precedence; otherwise asks Vercel (which may have auto-renamed the
+   * project) and persists the new value if it changed.
+   */
+  private async resolveLiveUrl(site: Site): Promise<string | undefined> {
+    if (site.customDomain) return `https://${site.customDomain}`
+    if (!site.vercelProjectId) return site.vercelProductionUrl
+    const fresh = await this.vercel.getProductionUrl(site.vercelProjectId).catch(() => null)
+    if (fresh && fresh !== site.vercelProductionUrl) {
+      site.vercelProductionUrl = fresh
+      await this.sites.save(site)
+    }
+    return fresh ?? site.vercelProductionUrl
   }
 }

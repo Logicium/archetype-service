@@ -1,115 +1,100 @@
 import { Injectable, Logger } from '@nestjs/common'
-import * as fs from 'fs'
-import * as path from 'path'
-import * as os from 'os'
-import * as crypto from 'crypto'
-import { put, head, del } from '@vercel/blob'
+import { put, del } from '@vercel/blob'
+import { Site } from '../entities/site.entity'
 
 /**
- * Captures a screenshot of a URL using Puppeteer and caches the PNG.
+ * Captures a screenshot of a site's production URL using Puppeteer, uploads it
+ * to Vercel Blob at a stable per-site path, and writes the resulting public URL
+ * + capture timestamp back onto the Site entity.
  *
- * Cache layer:
- *  - Vercel Blob when BLOB_READ_WRITE_TOKEN is set (survives Render restarts
- *    and works across multiple service instances).
- *  - On-disk tmp cache otherwise (local dev).
+ * Captures are explicit triggers only — there is no read-through cache, no TTL,
+ * no on-display capture. Callers decide when a new screenshot is warranted
+ * (manual refresh, deploy READY, reprovision, customDomain change, staleness
+ * threshold). The Site entity is the source of truth; the admin UI displays the
+ * persisted public Blob URL directly via <img src>, so the backend never
+ * streams screenshot bytes through Node.
  *
  * Browser layer:
  *  - @sparticuz/chromium + puppeteer-core when SCREENSHOT_USE_SERVERLESS_CHROMIUM=true.
- *    Set this on Render — its base image ships without system Chrome and
+ *    Set this on Render — its base image ships without system Chrome and the
  *    bundled puppeteer Chromium isn't reliably present.
  *  - Full puppeteer (bundled Chromium) for local dev.
  */
 @Injectable()
 export class ScreenshotService {
   private readonly logger = new Logger(ScreenshotService.name)
-  private readonly cacheDir: string
-  private readonly ttlMs: number
-  private readonly useBlob: boolean
   private readonly useServerlessChromium: boolean
-  private readonly inflight = new Map<string, Promise<Buffer>>()
+  /** Concurrent capture deduplication keyed by siteId. */
+  private readonly inflight = new Map<string, Promise<void>>()
 
   constructor() {
-    this.cacheDir = process.env.SCREENSHOT_CACHE_DIR ?? path.join(os.tmpdir(), 'ap-screenshots')
-    this.ttlMs = Number(process.env.SCREENSHOT_TTL_HOURS ?? 1) * 60 * 60 * 1_000
-    this.useBlob = !!process.env.BLOB_READ_WRITE_TOKEN
     this.useServerlessChromium = process.env.SCREENSHOT_USE_SERVERLESS_CHROMIUM === 'true'
-    if (!this.useBlob) fs.mkdirSync(this.cacheDir, { recursive: true })
-    this.logger.log(`Screenshot cache: ${this.useBlob ? 'Vercel Blob' : `disk (${this.cacheDir})`}; chromium: ${this.useServerlessChromium ? 'serverless (@sparticuz/chromium)' : 'bundled (puppeteer)'}`)
+    this.logger.log(`Screenshot capture: chromium=${this.useServerlessChromium ? 'serverless (@sparticuz/chromium)' : 'bundled (puppeteer)'}`)
   }
 
-  /** Returns a PNG Buffer for the given URL, serving from cache when fresh. */
-  async capture(url: string, width = 1200, height = 750): Promise<Buffer> {
-    const key = this.cacheKey(url, width, height)
-    const cached = await this.readCache(key)
-    if (cached) return cached
-    if (this.inflight.has(key)) return this.inflight.get(key)!
-    const promise = this.doCapture(url, width, height, key)
-    this.inflight.set(key, promise)
+  /** Stable, site-scoped path so URL drift / project renames don't orphan blobs. */
+  private blobPath(siteId: string): string {
+    return `screenshots/site-${siteId}.png`
+  }
+
+  /**
+   * Returns true if `site.screenshotCapturedAt` is older than `staleAfterMs`
+   * or missing entirely.
+   */
+  isStale(site: Site, staleAfterMs: number): boolean {
+    if (!site.screenshotCapturedAt) return true
+    return Date.now() - site.screenshotCapturedAt.getTime() > staleAfterMs
+  }
+
+  /**
+   * Captures a fresh screenshot of `url` and persists the resulting public Blob
+   * URL + timestamp on the Site entity. Caller is responsible for flushing the
+   * entity to the database.
+   *
+   * Concurrent calls for the same site await the same capture so we never
+   * fire two Puppeteer processes for the same site at once.
+   */
+  async captureForSite(site: Site, url: string, width = 1200, height = 750): Promise<void> {
+    const existing = this.inflight.get(site.id)
+    if (existing) return existing
+    const promise = this.doCaptureForSite(site, url, width, height)
+    this.inflight.set(site.id, promise)
     try {
-      return await promise
+      await promise
     } finally {
-      this.inflight.delete(key)
+      this.inflight.delete(site.id)
     }
   }
 
-  /** Deletes the cached file for a URL so the next request gets a fresh capture. */
-  async invalidate(url: string, width = 1200, height = 750): Promise<void> {
-    const key = this.cacheKey(url, width, height)
-    if (this.useBlob) {
-      try { await del(this.blobPath(key), { token: process.env.BLOB_READ_WRITE_TOKEN }) } catch { /* ok */ }
-      return
-    }
-    try { fs.unlinkSync(path.join(this.cacheDir, `${key}.png`)) } catch { /* ok */ }
-    try { fs.unlinkSync(path.join(this.cacheDir, `${key}.json`)) } catch { /* ok */ }
-  }
-
-  private cacheKey(url: string, width: number, height: number): string {
-    return crypto.createHash('sha256').update(`${url}|${width}|${height}`).digest('hex').slice(0, 24)
-  }
-
-  private blobPath(key: string): string {
-    return `screenshots/${key}.png`
-  }
-
-  private async readCache(key: string): Promise<Buffer | null> {
-    if (this.useBlob) {
+  /** Deletes the persisted screenshot blob and clears the entity fields. */
+  async deleteForSite(site: Site): Promise<void> {
+    if (process.env.BLOB_READ_WRITE_TOKEN) {
       try {
-        const meta = await head(this.blobPath(key), { token: process.env.BLOB_READ_WRITE_TOKEN })
-        const uploadedAt = meta.uploadedAt ? new Date(meta.uploadedAt).getTime() : 0
-        if (Date.now() - uploadedAt < this.ttlMs) {
-          const r = await fetch(meta.url)
-          if (r.ok) return Buffer.from(await r.arrayBuffer())
-        }
-      } catch { /* not found / fetch failed — recapture */ }
-      return null
-    }
-    const file = path.join(this.cacheDir, `${key}.png`)
-    const metaFile = path.join(this.cacheDir, `${key}.json`)
-    if (!fs.existsSync(file) || !fs.existsSync(metaFile)) return null
-    try {
-      const meta = JSON.parse(fs.readFileSync(metaFile, 'utf8')) as { ts: number }
-      if (Date.now() - meta.ts < this.ttlMs) return fs.readFileSync(file)
-    } catch { /* corrupt — recapture */ }
-    return null
-  }
-
-  private async writeCache(key: string, png: Buffer, url: string, width: number, height: number): Promise<void> {
-    if (this.useBlob) {
-      try {
-        await put(this.blobPath(key), png, {
-          access: 'public',
-          contentType: 'image/png',
-          token: process.env.BLOB_READ_WRITE_TOKEN,
-          addRandomSuffix: false,
-          allowOverwrite: true,
-        })
+        await del(this.blobPath(site.id), { token: process.env.BLOB_READ_WRITE_TOKEN })
       } catch (e) {
-        this.logger.warn(`Blob write failed for ${key}: ${(e as Error).message}`)
+        this.logger.warn(`Blob delete failed for site ${site.id}: ${(e as Error).message}`)
       }
-      return
     }
-    fs.writeFileSync(path.join(this.cacheDir, `${key}.png`), png)
-    fs.writeFileSync(path.join(this.cacheDir, `${key}.json`), JSON.stringify({ ts: Date.now(), url, width, height }))
+    site.screenshotUrl = undefined
+    site.screenshotCapturedAt = undefined
+    site.screenshotSourceUrl = undefined
+  }
+
+  private async doCaptureForSite(site: Site, url: string, width: number, height: number): Promise<void> {
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+      throw new Error('BLOB_READ_WRITE_TOKEN is required to persist screenshots')
+    }
+    const png = await this.capturePng(url, width, height)
+    const result = await put(this.blobPath(site.id), png, {
+      access: 'public',
+      contentType: 'image/png',
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+      addRandomSuffix: false,
+      allowOverwrite: true,
+    })
+    site.screenshotUrl = result.url
+    site.screenshotCapturedAt = new Date()
+    site.screenshotSourceUrl = url
   }
 
   private async launchBrowser() {
@@ -140,14 +125,9 @@ export class ScreenshotService {
         import('@sparticuz/chromium'),
         import('puppeteer-core'),
       ])
-      // v130+ ships ESM with named exports and a default export. Fall back to the
-      // module namespace itself for CJS-interop builds where .default is absent.
       const chromium = (chromiumMod.default ?? chromiumMod) as typeof chromiumMod.default
-      // Disable GPU compositing pipeline to save ~50 MB on headless Linux.
       chromium.setGraphicsMode = false
       const executablePath = await chromium.executablePath()
-      // chromium.args already includes Lambda/serverless defaults; we merge our
-      // memory flags and deduplicate so nothing is specified twice.
       const args = [...new Set([...chromium.args, ...MEMORY_FLAGS])]
       return puppeteer.launch({ args, executablePath, headless: true })
     }
@@ -155,7 +135,7 @@ export class ScreenshotService {
     return puppeteer.launch({ headless: true, args: MEMORY_FLAGS })
   }
 
-  private async doCapture(url: string, width: number, height: number, key: string): Promise<Buffer> {
+  private async capturePng(url: string, width: number, height: number): Promise<Buffer> {
     this.logger.log(`Capturing screenshot: ${url}`)
     let browser: Awaited<ReturnType<typeof this.launchBrowser>>
     try {
@@ -174,9 +154,7 @@ export class ScreenshotService {
       })
       await page.goto(url, { waitUntil: 'networkidle2', timeout: 30_000 })
       await new Promise(r => setTimeout(r, 800))
-      const png = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width, height } }) as Buffer
-      await this.writeCache(key, png, url, width, height)
-      return png
+      return await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width, height } }) as Buffer
     } finally {
       await browser.close()
     }
