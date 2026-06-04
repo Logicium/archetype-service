@@ -1,0 +1,71 @@
+{
+  "brand": "Sample Kitchen",
+  "tagline": "Honest food, made by hand.",
+  "blurb": "A neighborhood kitchen turning seasonal ingredients into dishes worth returning for.",
+  "contact": {
+    "address": "123 Main St, Your Town, ST 00000",
+    "phone": "(555) 555-0100",
+    "email": "hello@example.com",
+    "mapEmbedUrl": ""
+  },
+  "story": {
+    "title": "Our story",
+    "paragraphs": [
+      "We opened our doors because the food we craved wasn't on the menu anywhere nearby. Today we serve the kind of meals we'd want on our own table — straightforward, generous, and made from scratch.",
+      "Our menu changes with the seasons because the best ingredients have a window. When you eat with us, you're tasting what the farms around us are doing right now."
+    ],
+    "facts": [
+      { "label": "Founded", "value": "Today" },
+      { "label": "Local sources", "value": "12+ farms" },
+      { "label": "From scratch", "value": "100%" }
+    ]
+  },
+  "hours": [
+    { "day": "Monday", "open": "Closed" },
+    { "day": "Tuesday", "open": "11:00 AM – 9:00 PM" },
+    { "day": "Wednesday", "open": "11:00 AM – 9:00 PM" },
+    { "day": "Thursday", "open": "11:00 AM – 9:00 PM" },
+    { "day": "Friday", "open": "11:00 AM – 10:00 PM" },
+    { "day": "Saturday", "open": "10:00 AM – 10:00 PM" },
+    { "day": "Sunday", "open": "10:00 AM – 3:00 PM" }
+  ],
+  "photos": {
+    "hero": { "src": "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1800&q=80", "alt": "Warm restaurant interior with hanging lights", "caption": "" },
+    "about": { "src": "https://images.unsplash.com/photo-1466978913421-dad2ebd01d17?auto=format&fit=crop&w=1200&q=80", "alt": "Chef plating a dish at the pass", "caption": "" },
+    "gallery": [
+      { "src": "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=1200&q=80", "alt": "A finished plate", "caption": "" },
+      { "src": "https://images.unsplash.com/photo-1485921325833-c519f76c4927?auto=format&fit=crop&w=1200&q=80", "alt": "Fresh produce", "caption": "" },
+      { "src": "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?auto=format&fit=crop&w=1200&q=80", "alt": "A pour of wine", "caption": "" },
+      { "src": "https://images.unsplash.com/photo-1481931098730-318b6f776db0?auto=format&fit=crop&w=1200&q=80", "alt": "Friends sharing a meal", "caption": "" }
+    ]
+  },
+  "menu": {
+    "intro": "A small menu that changes with what's in season. Ask us what's good tonight.",
+    "fullMenuUrl": "",
+    "categories": [
+      {
+        "name": "To Start",
+        "description": "Small plates meant for sharing.",
+        "items": [
+          { "name": "Market Soup", "description": "Whatever's freshest this week, simply prepared and served with our house bread.", "price": "$8", "tags": ["vegetarian"] },
+          { "name": "Farm Greens", "description": "Local greens, sherry vinaigrette, shaved hard cheese.", "price": "$10", "tags": ["vegetarian", "gluten-free"] }
+        ]
+      },
+      {
+        "name": "Mains",
+        "description": "Larger plates, made to order.",
+        "items": [
+          { "name": "House Pasta", "description": "Hand-rolled noodles in a sauce that depends on the day. Always good.", "price": "$18", "tags": ["vegetarian"] },
+          { "name": "The Steak", "description": "Locally raised, cooked over fire, served simply with a side.", "price": "$32", "tags": ["gluten-free"] }
+        ]
+      }
+    ]
+  },
+  "testimonials": [
+    { "quote": "Easily the best meal we've had this year.", "author": "A. Friedman", "source": "Yelp" },
+    { "quote": "Comes back to me at random hours. The pasta especially.", "author": "M. Patel", "source": "Google" }
+  ],
+  "social": [
+    { "label": "Instagram", "href": "https://instagram.com" }
+  ]
+}

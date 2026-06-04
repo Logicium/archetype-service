@@ -39,6 +39,7 @@ export class PublicSitesController {
       slug: site.slug,
       archetype: site.archetype,
       plan: site.plan,
+      addOns: site.addOns || [],
       content: content ?? {},
     }
   }
@@ -86,6 +87,7 @@ export class AdminSitesController {
       deactivatedAt: s.deactivatedAt ?? null,
       screenshotUrl: s.screenshotUrl ?? null,
       screenshotCapturedAt: s.screenshotCapturedAt ?? null,
+      addOns: s.addOns ?? [],
     }))
   }
 

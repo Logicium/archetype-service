@@ -12,7 +12,7 @@ class OwnerDto {
 }
 
 class CreateOrderDto {
-  @IsIn(['mesa', 'hearth', 'vault', 'keystone']) archetype!: 'mesa' | 'hearth' | 'vault' | 'keystone'
+  @IsIn(['mesa', 'hearth', 'vault', 'marquee', 'keystone']) archetype!: 'mesa' | 'hearth' | 'vault' | 'marquee' | 'keystone'
   @IsString() plan!: string
   @IsArray() @IsString({ each: true }) addOns: string[] = []
   @IsObject() wizardPayload!: Record<string, unknown>

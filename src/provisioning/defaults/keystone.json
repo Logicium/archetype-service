@@ -1,0 +1,50 @@
+{
+  "brand": "Sample Services",
+  "tagline": "Honest work, done right.",
+  "blurb": "A small crew handling the kind of jobs that need doing properly the first time.",
+  "contact": {
+    "address": "123 Main St, Your Town, ST 00000",
+    "phone": "(555) 555-0100",
+    "email": "dispatch@example.com",
+    "mapEmbedUrl": ""
+  },
+  "story": {
+    "title": "Our story",
+    "paragraphs": [
+      "We've been on enough job sites to know what good work looks like — and what cutting corners ends up costing the customer six months later. We don't cut corners.",
+      "We show up when we say we will, we explain what we're doing in plain language, and we leave the place cleaner than we found it."
+    ],
+    "facts": [
+      { "label": "Experience", "value": "15+ years" },
+      { "label": "Licensed", "value": "Yes" },
+      { "label": "Insured", "value": "Yes" }
+    ]
+  },
+  "photos": {
+    "hero": { "src": "https://images.unsplash.com/photo-1581094794329-c8112a89af12?auto=format&fit=crop&w=1800&q=80", "alt": "Skilled tradesperson at work", "caption": "" },
+    "about": { "src": "https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=1200&q=80", "alt": "The crew on a job site", "caption": "" },
+    "gallery": [
+      { "src": "https://images.unsplash.com/photo-1581092334442-8b9fe8b00b18?auto=format&fit=crop&w=1200&q=80", "alt": "Finished work, photographed", "caption": "" },
+      { "src": "https://images.unsplash.com/photo-1521587760476-6c12a4b040da?auto=format&fit=crop&w=1200&q=80", "alt": "Tools laid out", "caption": "" }
+    ]
+  },
+  "serviceArea": "Within 30 miles of town",
+  "dispatchPhone": "(555) 555-0100",
+  "emergencyAvailable": true,
+  "services": [
+    { "name": "Service Calls", "description": "Same-day or next-day visits for repairs and small jobs.", "price": "From $95", "icon": "wrench" },
+    { "name": "Installations", "description": "Quoted up-front, scheduled at your convenience, finished cleanly.", "price": "Quoted", "icon": "build" },
+    { "name": "Maintenance", "description": "Seasonal check-ups that catch small issues before they get expensive.", "price": "From $150", "icon": "calendar" }
+  ],
+  "capabilities": [
+    { "label": "Years in business", "value": "15+" },
+    { "label": "Jobs completed", "value": "2,000+" },
+    { "label": "Warranty", "value": "1 year" }
+  ],
+  "testimonials": [
+    { "quote": "Showed up on time, fixed it right, fair price. Hard to find these days.", "author": "R. Coleman", "source": "Google" }
+  ],
+  "social": [
+    { "label": "Facebook", "href": "https://facebook.com" }
+  ]
+}

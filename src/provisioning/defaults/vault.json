@@ -1,0 +1,56 @@
+{
+  "brand": "Sample Shop",
+  "tagline": "Goods worth keeping.",
+  "blurb": "A small shop carrying carefully chosen pieces from makers we know and trust.",
+  "contact": {
+    "address": "123 Main St, Your Town, ST 00000",
+    "phone": "(555) 555-0100",
+    "email": "hello@example.com",
+    "mapEmbedUrl": ""
+  },
+  "story": {
+    "title": "Our story",
+    "paragraphs": [
+      "We started this shop because we kept buying things we didn't love. Everything here is something we'd put in our own home.",
+      "We work directly with makers whenever we can. If we sell it, we can tell you who made it and how."
+    ],
+    "facts": [
+      { "label": "Makers", "value": "40+" },
+      { "label": "Free local pickup", "value": "Yes" },
+      { "label": "Returns", "value": "30 days" }
+    ]
+  },
+  "hours": [
+    { "day": "Monday", "open": "Closed" },
+    { "day": "Tuesday", "open": "10:00 AM – 6:00 PM" },
+    { "day": "Wednesday", "open": "10:00 AM – 6:00 PM" },
+    { "day": "Thursday", "open": "10:00 AM – 6:00 PM" },
+    { "day": "Friday", "open": "10:00 AM – 7:00 PM" },
+    { "day": "Saturday", "open": "10:00 AM – 7:00 PM" },
+    { "day": "Sunday", "open": "11:00 AM – 5:00 PM" }
+  ],
+  "photos": {
+    "hero": { "src": "https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1800&q=80", "alt": "A curated retail interior", "caption": "" },
+    "about": { "src": "https://images.unsplash.com/photo-1567401893414-76b7b1e5a7a5?auto=format&fit=crop&w=1200&q=80", "alt": "Shopkeeper arranging a display", "caption": "" },
+    "storefront": { "src": "https://images.unsplash.com/photo-1604719312566-8912e9227c6a?auto=format&fit=crop&w=1200&q=80", "alt": "Storefront from the sidewalk", "caption": "" },
+    "gallery": [
+      { "src": "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1200&q=80", "alt": "A product flat-lay", "caption": "" },
+      { "src": "https://images.unsplash.com/photo-1445205170230-053b83016050?auto=format&fit=crop&w=1200&q=80", "alt": "A handmade detail", "caption": "" }
+    ]
+  },
+  "featured": [
+    { "name": "Sample Product", "price": "$48", "image": "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=800&q=80", "blurb": "A small thing that does its job beautifully.", "badge": "New", "url": "" },
+    { "name": "Another Sample", "price": "$24", "image": "https://images.unsplash.com/photo-1572635196237-14b3f281503f?auto=format&fit=crop&w=800&q=80", "blurb": "Made nearby, made to last.", "badge": "", "url": "" }
+  ],
+  "categories": [
+    { "name": "Home", "image": "https://images.unsplash.com/photo-1493663284031-b7e3aefcae8e?auto=format&fit=crop&w=800&q=80", "url": "", "count": "24 items" },
+    { "name": "Gifts", "image": "https://images.unsplash.com/photo-1513885535751-8b9238bd345a?auto=format&fit=crop&w=800&q=80", "url": "", "count": "16 items" }
+  ],
+  "testimonials": [
+    { "quote": "I never leave empty-handed.", "author": "S. Liu", "source": "Google" }
+  ],
+  "social": [
+    { "label": "Instagram", "href": "https://instagram.com" }
+  ],
+  "shopUrl": ""
+}

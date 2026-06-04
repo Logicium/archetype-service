@@ -13,6 +13,9 @@ const FIELD_PROMPTS: Record<string, string> = {
   'room.blurb':         'a one-sentence selling description of the named hotel room',
   'product.blurb':      'a punchy one-line selling description of the named product',
   'menuItem.description':'a short, appetising description of the named menu item (1–2 sentences)',
+  'event.blurb':        'a one-sentence selling description of the named live event that conveys mood and what audiences will experience',
+  'series.blurb':       'a one-sentence description of the named recurring program / event series',
+  'performer.bio':      'a 1–2 sentence neutral bio for the named performer or company suitable for a venue listing',
   'capability.value':   'a concrete, credibility-building value for the business stat (e.g. "15+" or "Licensed & Insured")',
 }
 
@@ -20,6 +23,7 @@ const ARCHETYPE_CONTEXT: Record<string, string> = {
   mesa:      'restaurant or food & beverage business',
   hearth:    'bed & breakfast or boutique lodging',
   vault:     'retail or e-commerce shop',
+  marquee:   'events-focused business or organization — music venue, local band, art gallery, festival, community event space, comedy club, etc.',
   keystone:  'trades or professional-services business (plumber, electrician, contractor, etc.)',
 }
 

@@ -12,6 +12,9 @@ import { EmailService } from '../common/email.service'
 import { PROVISION_JOB, PROVISION_QUEUE } from './provisioning.constants'
 import { resolveDeployedContentApiUrl } from './content-api.util'
 import { normalizeWizardPayload } from './wizard-payload.util'
+import { getArchetypeDefaults } from './defaults'
+import { mergeContent } from './merge-content.util'
+import { SiteCopyGenerator } from './site-copy.generator'
 
 @Processor(PROVISION_QUEUE)
 export class ProvisioningProcessor extends WorkerHost {
@@ -22,6 +25,7 @@ export class ProvisioningProcessor extends WorkerHost {
     private readonly github: GitHubProvisioner,
     private readonly vercel: VercelProvisioner,
     private readonly email: EmailService,
+    private readonly copyGen: SiteCopyGenerator,
   ) { super() }
 
   /**
@@ -52,7 +56,21 @@ export class ProvisioningProcessor extends WorkerHost {
     // The wizard UI posts a flat form as wizardPayload; normalize to { desiredSlug, config }
     // so the rest of the pipeline (slug derivation, seed-content, .env.production, tenant.config.json)
     // sees a stable SiteContent-shaped payload regardless of which client version submitted it.
-    const wp = normalizeWizardPayload(order.wizardPayload, order.archetype as 'mesa' | 'hearth' | 'vault' | 'keystone')
+    const archetype = order.archetype as 'mesa' | 'hearth' | 'vault' | 'marquee' | 'keystone'
+    const wp = normalizeWizardPayload(order.wizardPayload, archetype)
+
+    // Layer: archetype defaults < AI-generated copy < wizard input.
+    // Defaults give every new site placeholder photos + stock copy so it doesn't look empty;
+    // the AI layer fills wordy fields (taglines, blurbs, item descriptions) using wizard inputs
+    // as context; wizard input always wins for fields the buyer actually filled in.
+    const defaults = getArchetypeDefaults(archetype)
+    let aiCopy: Record<string, unknown> = {}
+    try {
+      aiCopy = await this.copyGen.generate(archetype, (wp.config ?? {}) as Record<string, unknown>)
+    } catch (e) {
+      this.logger.warn(`AI copy generation failed: ${(e as Error).message}`)
+    }
+    const seededConfig = mergeContent<Record<string, unknown>>(defaults, aiCopy, wp.config ?? {})
 
     /** Helper: run a step, log success/failure, rethrow on failure. */
     const step = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
@@ -106,7 +124,7 @@ export class ProvisioningProcessor extends WorkerHost {
       const row = contents.create({
         site: site!,
         version: (latest?.version ?? 0) + 1,
-        payload: (wp.config ?? {}) as Record<string, unknown>,
+        payload: seededConfig,
         published: true,
         publishedAt: new Date(),
       })
@@ -135,7 +153,7 @@ export class ProvisioningProcessor extends WorkerHost {
       const tenantConfig = {
         _generated: new Date().toISOString(),
         archetype: site!.archetype,
-        ...(wp.config ?? {}),
+        ...seededConfig,
       }
       await this.github.putFile(
         info.owner, info.repo,

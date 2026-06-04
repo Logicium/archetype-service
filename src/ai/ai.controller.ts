@@ -3,7 +3,7 @@ import { IsObject, IsOptional, IsString } from 'class-validator'
 import { AiService } from './ai.service'
 
 export class SuggestDto {
-  /** Which archetype the site is (mesa | hearth | vault | keystone | '') */
+  /** Which archetype the site is (mesa | hearth | vault | marquee | keystone | '') */
   @IsString()
   archetype!: string
   /** Business / brand name */

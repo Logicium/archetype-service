@@ -9,14 +9,17 @@ import { ProvisioningProcessor } from './provisioning.processor'
 import { SiteUpdateProcessor } from './site-update.processor'
 import { GitHubProvisioner } from './github.provisioner'
 import { VercelProvisioner } from './vercel.provisioner'
+import { SiteCopyGenerator } from './site-copy.generator'
+import { AiModule } from '../ai/ai.module'
 import { PROVISION_QUEUE, SITE_UPDATE_QUEUE } from './provisioning.constants'
 
 @Module({
   imports: [
     MikroOrmModule.forFeature([Order, Site, SiteContent, DeployLog]),
     BullModule.registerQueue({ name: PROVISION_QUEUE }, { name: SITE_UPDATE_QUEUE }),
+    AiModule,
   ],
-  providers: [ProvisioningProcessor, SiteUpdateProcessor, GitHubProvisioner, VercelProvisioner],
+  providers: [ProvisioningProcessor, SiteUpdateProcessor, GitHubProvisioner, VercelProvisioner, SiteCopyGenerator],
   exports: [GitHubProvisioner, VercelProvisioner, BullModule],
 })
 export class ProvisioningModule {}

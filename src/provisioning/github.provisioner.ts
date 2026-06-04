@@ -14,17 +14,18 @@ export class GitHubProvisioner {
     if (!token) this.logger.warn('GITHUB_TOKEN not set — GitHub provisioning will be skipped')
   }
 
-  templateFor(kind: 'mesa' | 'hearth' | 'vault' | 'keystone'): string {
+  templateFor(kind: 'mesa' | 'hearth' | 'vault' | 'marquee' | 'keystone'): string {
     switch (kind) {
       case 'mesa': return process.env.GITHUB_TEMPLATE_MESA || 'archetype-mesa-template-ui'
       case 'hearth': return process.env.GITHUB_TEMPLATE_HEARTH || 'archetype-hearth-template-ui'
       case 'vault': return process.env.GITHUB_TEMPLATE_VAULT || 'archetype-vault-template-ui'
+      case 'marquee': return process.env.GITHUB_TEMPLATE_MARQUEE || 'archetype-marquee-template-ui'
       case 'keystone': return process.env.GITHUB_TEMPLATE_KEYSTONE || 'archetype-keystone-template-ui'
     }
   }
 
   /** Idempotent: returns existing repo if one with the same name already exists. */
-  async createRepo(kind: 'mesa' | 'hearth' | 'vault' | 'keystone', name: string): Promise<{ owner: string; repo: string; repoId: number; defaultBranch: string }> {
+  async createRepo(kind: 'mesa' | 'hearth' | 'vault' | 'marquee' | 'keystone', name: string): Promise<{ owner: string; repo: string; repoId: number; defaultBranch: string }> {
     const org = process.env.GITHUB_ORG
     if (!this.client || !org) {
       return { owner: org || 'logicium', repo: name, repoId: 0, defaultBranch: 'main' }

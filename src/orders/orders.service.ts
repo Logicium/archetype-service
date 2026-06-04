@@ -11,7 +11,7 @@ import { PROVISION_QUEUE, PROVISION_JOB } from '../provisioning/provisioning.con
 import { AuthService } from '../auth/auth.service'
 
 export interface CreateCheckoutInput {
-  archetype: 'mesa' | 'hearth' | 'vault' | 'keystone'
+  archetype: 'mesa' | 'hearth' | 'vault' | 'marquee' | 'keystone'
   plan: string
   addOns: string[]
   wizardPayload: Record<string, unknown>

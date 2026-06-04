@@ -16,7 +16,7 @@ export class Order {
   owner!: Owner
 
   @Property()
-  archetype!: 'mesa' | 'hearth' | 'vault' | 'keystone'
+  archetype!: 'mesa' | 'hearth' | 'vault' | 'marquee' | 'keystone'
 
   @Property()
   plan!: string

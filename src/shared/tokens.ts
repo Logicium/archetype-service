@@ -26,14 +26,15 @@ export type SwatchName =
   | 'electric' | 'punch' | 'neon' | 'aurora'
 
 export type SiteVariant = 'essentials' | 'portfolio'
-export type Archetype = 'dine' | 'stay' | 'shop' | 'project' | 'utility'
+export type Archetype = 'dine' | 'stay' | 'shop' | 'venue' | 'project' | 'utility'
 /** Maps an `Archetype` to its template repo key. */
-export type ArchetypeKey = 'mesa' | 'hearth' | 'vault' | 'keystone'
+export type ArchetypeKey = 'mesa' | 'hearth' | 'vault' | 'marquee' | 'keystone'
 
 export const ARCHETYPE_OF: Record<ArchetypeKey, Archetype> = {
   mesa: 'dine',
   hearth: 'stay',
   vault: 'shop',
+  marquee: 'venue',
   keystone: 'utility',
 }
 

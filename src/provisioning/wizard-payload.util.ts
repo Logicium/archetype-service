@@ -17,7 +17,7 @@
  */
 
 type AnyRec = Record<string, unknown>
-type Archetype = 'mesa' | 'hearth' | 'vault' | 'keystone'
+type Archetype = 'mesa' | 'hearth' | 'vault' | 'marquee' | 'keystone'
 
 interface Normalized {
   desiredSlug?: string
@@ -161,6 +161,66 @@ function flatFormToContent(form: AnyRec, archetype: Archetype): AnyRec {
         count: asStr(c.count),
       })),
       shopUrl: asStr(form.shopUrl),
+    }
+  }
+
+  if (archetype === 'marquee') {
+    return {
+      ...common,
+      hours,
+      photos: {
+        hero: photoOrEmpty(form.heroPhoto),
+        about: photoOrEmpty(form.aboutPhoto),
+        gallery: asArr<unknown>(form.gallery).map(photoOrEmpty),
+      },
+      ticketingUrl: asStr(form.ticketingUrl),
+      newsletterUrl: asStr(form.newsletterUrl),
+      venue: {
+        capacity: asStr(isRec(form.venue) ? form.venue.capacity : form.venueCapacity),
+        ageRestrictions: asStr(isRec(form.venue) ? form.venue.ageRestrictions : form.venueAgeRestrictions),
+        parking: asStr(isRec(form.venue) ? form.venue.parking : form.venueParking),
+        accessibility: asStr(isRec(form.venue) ? form.venue.accessibility : form.venueAccessibility),
+        foodAndDrink: asStr(isRec(form.venue) ? form.venue.foodAndDrink : form.venueFoodAndDrink),
+        rentalUrl: asStr(isRec(form.venue) ? form.venue.rentalUrl : form.venueRentalUrl),
+        rentalBlurb: asStr(isRec(form.venue) ? form.venue.rentalBlurb : form.venueRentalBlurb),
+      },
+      events: asArr<AnyRec>(form.events).map(e => ({
+        id: asStr(e.id) || slugify(asStr(e.title)),
+        title: asStr(e.title),
+        date: asStr(e.date),
+        startTime: asStr(e.startTime),
+        doorsTime: asStr(e.doorsTime),
+        category: asStr(e.category),
+        priceLabel: asStr(e.priceLabel),
+        ticketUrl: asStr(e.ticketUrl),
+        status: asStr(e.status),
+        lineup: typeof e.lineup === 'string'
+          ? (e.lineup as string).split(',').map(s => s.trim()).filter(Boolean)
+          : asArr<string>(e.lineup),
+        image: asStr(e.image),
+        imageAlt: asStr(e.imageAlt),
+        blurb: asStr(e.blurb),
+        description: asStr(e.description),
+        ageRestriction: asStr(e.ageRestriction),
+        runtimeMinutes: typeof e.runtimeMinutes === 'number' ? e.runtimeMinutes : undefined,
+        featured: Boolean(e.featured),
+      })),
+      series: asArr<AnyRec>(form.series).map(s => ({
+        id: asStr(s.id) || slugify(asStr(s.name)),
+        name: asStr(s.name),
+        cadence: asStr(s.cadence),
+        blurb: asStr(s.blurb),
+        image: asStr(s.image),
+        url: asStr(s.url),
+      })),
+      performers: asArr<AnyRec>(form.performers).map(p => ({
+        id: asStr(p.id) || slugify(asStr(p.name)),
+        name: asStr(p.name),
+        role: asStr(p.role),
+        bio: asStr(p.bio),
+        image: asStr(p.image),
+        url: asStr(p.url),
+      })),
     }
   }
 

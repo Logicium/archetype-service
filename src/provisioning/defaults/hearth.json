@@ -1,0 +1,65 @@
+{
+  "brand": "Sample Inn",
+  "tagline": "A quiet place to land.",
+  "blurb": "A small inn for travelers who'd rather feel at home than at a hotel.",
+  "contact": {
+    "address": "123 Main St, Your Town, ST 00000",
+    "phone": "(555) 555-0100",
+    "email": "stay@example.com",
+    "mapEmbedUrl": ""
+  },
+  "story": {
+    "title": "Our story",
+    "paragraphs": [
+      "We've stayed in plenty of forgettable hotels — fluorescent hallways, key cards, a phone tree at the front desk. This is the opposite of that.",
+      "Every room is different. We made the beds ourselves. Breakfast is whatever sounded good this morning. You'll probably meet a dog."
+    ],
+    "facts": [
+      { "label": "Rooms", "value": "6" },
+      { "label": "Breakfast", "value": "Included" },
+      { "label": "Check-in", "value": "After 3pm" }
+    ]
+  },
+  "photos": {
+    "hero": { "src": "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=1800&q=80", "alt": "A cozy inn at dusk", "caption": "" },
+    "about": { "src": "https://images.unsplash.com/photo-1551776235-dde6d4829808?auto=format&fit=crop&w=1200&q=80", "alt": "A welcoming common room", "caption": "" },
+    "rooms": [
+      { "src": "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=1200&q=80", "alt": "Sunlit guest room", "caption": "" },
+      { "src": "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1200&q=80", "alt": "A queen bed by a window", "caption": "" }
+    ],
+    "gallery": [
+      { "src": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=1200&q=80", "alt": "Breakfast spread", "caption": "" },
+      { "src": "https://images.unsplash.com/photo-1521783988139-89397d761dce?auto=format&fit=crop&w=1200&q=80", "alt": "A reading nook", "caption": "" }
+    ]
+  },
+  "rooms": [
+    {
+      "name": "The Garden Room",
+      "blurb": "Our most popular room — quiet, south-facing, with a view of the back garden.",
+      "image": "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=1200&q=80",
+      "features": ["Queen bed", "Private bath", "Garden view"],
+      "rateFrom": "$180",
+      "bookUrl": ""
+    },
+    {
+      "name": "The Loft",
+      "blurb": "Top floor, sloped ceilings, the kind of room that makes you want to read all afternoon.",
+      "image": "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1200&q=80",
+      "features": ["King bed", "Private bath", "Skylight"],
+      "rateFrom": "$220",
+      "bookUrl": ""
+    }
+  ],
+  "amenities": [
+    { "label": "Breakfast included", "description": "Made each morning, usually involving eggs from down the road.", "icon": "coffee" },
+    { "label": "Free WiFi", "description": "Fast enough to work if you have to.", "icon": "wifi" },
+    { "label": "Off-street parking", "description": "Pull right in.", "icon": "car" }
+  ],
+  "testimonials": [
+    { "quote": "Felt more like visiting friends than checking into a hotel.", "author": "J. Reed", "source": "Booking.com" }
+  ],
+  "social": [
+    { "label": "Instagram", "href": "https://instagram.com" }
+  ],
+  "bookingUrl": ""
+}

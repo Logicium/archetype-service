@@ -16,6 +16,11 @@ import { AnalyticsModule } from './analytics/analytics.module'
 import { DomainsModule } from './domains/domains.module'
 import { ExtrasModule } from './extras/extras.module'
 import { AiModule } from './ai/ai.module'
+import { BookingsModule } from './bookings/bookings.module'
+import { LodgingModule } from './lodging/lodging.module'
+import { ShopModule } from './shop/shop.module'
+import { OrderingModule } from './ordering/ordering.module'
+import { TicketingModule } from './ticketing/ticketing.module'
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
 
@@ -45,6 +50,11 @@ const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
     DomainsModule,
     ExtrasModule,
     AiModule,
+    BookingsModule,
+    LodgingModule,
+    ShopModule,
+    OrderingModule,
+    TicketingModule,
   ],
 })
 export class AppModule {}

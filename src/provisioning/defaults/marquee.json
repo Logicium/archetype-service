@@ -1,0 +1,52 @@
+{
+  "brand": "Sample Event Space",
+  "tagline": "A place to gather & witness.",
+  "blurb": "An events-focused site — live music, art openings, festivals, or whatever you put on the calendar.",
+  "contact": {
+    "address": "100 Main St, Your Town, ST 00000",
+    "phone": "(555) 555-0100",
+    "email": "hello@example.com",
+    "mapEmbedUrl": ""
+  },
+  "story": {
+    "title": "Our story",
+    "paragraphs": [
+      "We program a calendar we'd want to attend ourselves — a mix of touring acts, neighbors, regular favorites, and the occasional one-off. Every event is a chance to be in a room together at a scale that still feels human.",
+      "We pay every artist. We program for our community, not for an algorithm."
+    ],
+    "facts": [
+      { "label": "Capacity", "value": "240" },
+      { "label": "Disciplines", "value": "Music · Art · Comedy · Community" },
+      { "label": "Events / year", "value": "120+" }
+    ]
+  },
+  "photos": {
+    "hero": { "src": "https://images.unsplash.com/photo-1507676184212-d03ab07a01bf?auto=format&fit=crop&w=1800&q=80", "alt": "Front of a venue with a lit marquee at night", "caption": "" },
+    "about": { "src": "https://images.unsplash.com/photo-1503095396549-807759245b35?auto=format&fit=crop&w=1200&q=80", "alt": "Wide interior of the room set for an event", "caption": "" },
+    "gallery": [
+      { "src": "https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?auto=format&fit=crop&w=1200&q=80", "alt": "Live band on stage", "caption": "" },
+      { "src": "https://images.unsplash.com/photo-1485579149621-3123dd979885?auto=format&fit=crop&w=1200&q=80", "alt": "Crowd silhouetted against stage lights", "caption": "" }
+    ]
+  },
+  "ticketingUrl": "",
+  "newsletterUrl": "",
+  "venue": {
+    "capacity": "240 standing · 180 seated",
+    "ageRestrictions": "All ages unless noted",
+    "parking": "Street parking; lot one block north",
+    "accessibility": "Step-free entry, accessible restrooms, ASL on request",
+    "foodAndDrink": "Full bar; locally sourced snacks",
+    "rentalUrl": "",
+    "rentalBlurb": "Available for private events, screenings, weddings, and pop-ups."
+  },
+  "events": [],
+  "series": [],
+  "performers": [],
+  "testimonials": [
+    { "quote": "The best small space in the region — every event feels intentional.", "author": "M. Alvarez", "source": "Google" }
+  ],
+  "social": [
+    { "label": "Instagram", "href": "https://instagram.com" }
+  ]
+}
+
