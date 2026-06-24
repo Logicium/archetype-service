@@ -198,7 +198,7 @@ export class Site {
 
   /** Enabled premium add-ons (e.g. 'appointments', 'eshop', 'lodging', 'ordering', 'ticketing').
    *  Driven by the order's `addOns` at provisioning time; mutable by admin. */
-  @Property({ type: 'json', default: '[]' })
+  @Property({ type: 'json' })
   addOns: string[] = []
 
   @Property({ defaultRaw: 'NOW()' })
