@@ -21,6 +21,7 @@ import { LodgingModule } from './lodging/lodging.module'
 import { ShopModule } from './shop/shop.module'
 import { OrderingModule } from './ordering/ordering.module'
 import { TicketingModule } from './ticketing/ticketing.module'
+import { PaymentsModule } from './payments/payments.module'
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
 
@@ -55,6 +56,7 @@ const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
     ShopModule,
     OrderingModule,
     TicketingModule,
+    PaymentsModule,
   ],
 })
 export class AppModule {}

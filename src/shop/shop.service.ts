@@ -6,7 +6,20 @@ import { ShopOrder, ShopOrderItem, ShippingAddress, FulfillmentType } from '../e
 import { ShopConfig, Site } from '../entities/site.entity'
 import { Owner } from '../entities/owner.entity'
 import { EmailService } from '../common/email.service'
+import { PaymentsService } from '../payments/payments.service'
 import { resolveShopConfig } from './shop-config'
+
+/** Returns the `scheme://host` of a trusted origin, or undefined if invalid. */
+function sanitizeOrigin(raw?: string): string | undefined {
+  if (!raw) return undefined
+  try {
+    const u = new URL(raw)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return undefined
+    return `${u.protocol}//${u.host}`
+  } catch {
+    return undefined
+  }
+}
 
 export interface CreateShopOrderDto {
   siteSlug: string
@@ -41,6 +54,7 @@ export class ShopService {
     @InjectRepository(Site) private readonly sites: EntityRepository<Site>,
     private readonly em: EntityManager,
     private readonly email: EmailService,
+    private readonly payments: PaymentsService,
   ) {}
 
   // ----- Public -----
@@ -61,7 +75,12 @@ export class ShopService {
     }
   }
 
-  async createOrder(dto: CreateShopOrderDto) {
+  /**
+   * Validate the cart, snapshot line items, decrement inventory, and persist a
+   * pending ShopOrder. Shared by the no-payment path (`createOrder`) and the
+   * Stripe path (`createCheckoutSession`).
+   */
+  private async buildOrder(dto: CreateShopOrderDto) {
     const site = await this.sites.findOne({ slug: dto.siteSlug }, { populate: ['owner'] })
     if (!site) throw new NotFoundException('Site not found')
     if (!site.addOns?.includes('eshop')) throw new ForbiddenException('Shop not enabled for this site')
@@ -133,10 +152,99 @@ export class ShopService {
     })
     await this.em.persistAndFlush(order)
 
+    return { order, site, config }
+  }
+
+  /** No-payment order (pickup/pay-later, or demo/sandbox without Connect). */
+  async createOrder(dto: CreateShopOrderDto) {
+    const { order, site, config } = await this.buildOrder(dto)
     await this.sendOrderEmails(order, site, config).catch(e =>
       this.logger.error(`Shop order email failed: ${(e as Error).message}`),
     )
+    return this.publicOrder(order)
+  }
 
+  /**
+   * Create a pending order and a Stripe Checkout session that settles to the
+   * site owner's Connect account. When the owner hasn't finished payment
+   * onboarding (or Stripe isn't configured), falls back to a no-payment order
+   * so the storefront still works — `checkoutUrl` is null in that case and the
+   * caller shows the ordinary confirmation.
+   */
+  async createCheckoutSession(dto: CreateShopOrderDto, origin?: string) {
+    const { order, site, config } = await this.buildOrder(dto)
+
+    const base = sanitizeOrigin(origin)
+      || site.vercelProductionUrl
+      || process.env.PUBLIC_APP_URL
+      || 'http://localhost:5173'
+    const cleanBase = base.replace(/\/$/, '')
+    const successUrl = `${cleanBase}/shop?order=${order.id}&status=success`
+    const cancelUrl = `${cleanBase}/shop?order=${order.id}&status=cancelled`
+
+    const lineItems = order.items.map(i => ({
+      quantity: i.quantity,
+      price_data: {
+        currency: config.currency.toLowerCase(),
+        product_data: { name: i.name },
+        unit_amount: i.unitPriceCents,
+      },
+    }))
+    if (order.shippingCents > 0) {
+      lineItems.push({
+        quantity: 1,
+        price_data: {
+          currency: config.currency.toLowerCase(),
+          product_data: { name: 'Shipping' },
+          unit_amount: order.shippingCents,
+        },
+      })
+    }
+
+    const checkout = await this.payments.createDestinationCheckout({
+      owner: site.owner,
+      lineItems,
+      successUrl,
+      cancelUrl,
+      customerEmail: order.email,
+      metadata: { shopOrderId: order.id, siteId: site.id },
+    }).catch(e => {
+      this.logger.warn(`Shop checkout session failed, falling back to no-payment: ${(e as Error).message}`)
+      return null
+    })
+
+    if (!checkout) {
+      // Owner can't accept charges yet — treat as a normal placed order.
+      await this.sendOrderEmails(order, site, config).catch(e =>
+        this.logger.error(`Shop order email failed: ${(e as Error).message}`))
+      return { orderId: order.id, checkoutUrl: null as string | null, order: this.publicOrder(order) }
+    }
+
+    order.stripeSessionId = checkout.sessionId
+    await this.em.persistAndFlush(order)
+    return { orderId: order.id, checkoutUrl: checkout.url, order: this.publicOrder(order) }
+  }
+
+  /**
+   * Verify a checkout session with Stripe and flip the order to paid. Called
+   * from the storefront success redirect; idempotent and safe to re-run.
+   */
+  async confirmCheckout(orderId: string) {
+    const order = await this.orders.findOne({ id: orderId }, { populate: ['site', 'site.owner'] as never })
+    if (!order) throw new NotFoundException('Order not found')
+    if (order.status !== 'pending' || !order.stripeSessionId) return this.publicOrder(order)
+    const stripe = this.payments.stripeClient
+    if (!stripe) return this.publicOrder(order)
+
+    const session = await stripe.checkout.sessions.retrieve(order.stripeSessionId)
+    if (session.payment_status === 'paid') {
+      order.status = 'paid'
+      order.stripePaymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : undefined
+      await this.em.persistAndFlush(order)
+      const site = order.site
+      await this.sendOrderEmails(order, site, resolveShopConfig(site.shopConfig)).catch(e =>
+        this.logger.error(`Shop order email failed: ${(e as Error).message}`))
+    }
     return this.publicOrder(order)
   }
 

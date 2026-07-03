@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto'
 
 @Entity()
 export class Owner {
-  [OptionalProps]?: 'createdAt' | 'name'
+  [OptionalProps]?: 'createdAt' | 'name' | 'stripeChargesEnabled' | 'stripePayoutsEnabled' | 'stripeDetailsSubmitted'
 
   @PrimaryKey({ type: 'uuid' })
   id: string = randomUUID()
@@ -29,6 +29,33 @@ export class Owner {
 
   @Property({ nullable: true })
   lastLoginAt?: Date
+
+  // ── Payments: Stripe Connect (Express) ──
+  // One connected account per owner routes payouts for EVERY site they own —
+  // destination charges on any of their sites' orders settle here.
+  @Property({ nullable: true })
+  stripeAccountId?: string
+
+  /** Cached from Stripe on each status refresh — cheaper than round-tripping. */
+  @Property({ default: false })
+  stripeChargesEnabled: boolean = false
+
+  @Property({ default: false })
+  stripePayoutsEnabled: boolean = false
+
+  @Property({ default: false })
+  stripeDetailsSubmitted: boolean = false
+
+  // ── Payments: Plaid bank link (optional; funds a Connect external account) ──
+  @Property({ nullable: true })
+  plaidItemId?: string
+
+  /** Display-only bank identity for the admin UI (never store account numbers). */
+  @Property({ nullable: true })
+  bankName?: string
+
+  @Property({ nullable: true })
+  bankMask?: string
 
   @Property({ defaultRaw: 'NOW()' })
   createdAt: Date = new Date()

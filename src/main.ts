@@ -24,6 +24,15 @@ async function bootstrap() {
     ALTER TABLE "${schema}"."site" ADD COLUMN IF NOT EXISTS "screenshot_url" varchar(255) NULL;
     ALTER TABLE "${schema}"."site" ADD COLUMN IF NOT EXISTS "screenshot_captured_at" timestamptz NULL;
     ALTER TABLE "${schema}"."site" ADD COLUMN IF NOT EXISTS "screenshot_source_url" varchar(255) NULL;
+    ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "stripe_account_id" varchar(255) NULL;
+    ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "stripe_charges_enabled" boolean NOT NULL DEFAULT false;
+    ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "stripe_payouts_enabled" boolean NOT NULL DEFAULT false;
+    ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "stripe_details_submitted" boolean NOT NULL DEFAULT false;
+    ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "plaid_item_id" varchar(255) NULL;
+    ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "bank_name" varchar(255) NULL;
+    ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "bank_mask" varchar(255) NULL;
+    ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "stripe_session_id" varchar(255) NULL;
+    ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "stripe_payment_intent_id" varchar(255) NULL;
   `)
 
   app.use(helmet({ contentSecurityPolicy: false }))

@@ -21,6 +21,8 @@ export const PRICING: PriceItem[] = [
     includes: ['Choice of three design themes (Studio, Heritage, Vibrant)', 'Choice of eight color swatches', 'Hosted, fast, mobile-ready', '6–8 of your photos placed and captioned', 'Hours, contact, and map embedded'] },
   { id: 'website-extended', name: 'Website (Portfolio)', price: 250, blurb: 'The extended template with a dedicated gallery and 12–16 photos.', category: 'website', stripePriceEnv: 'STRIPE_PRICE_WEBSITE_PORTFOLIO',
     includes: ['Everything in Essentials', 'Dedicated gallery / lookbook page', '12–16 of your photos placed and captioned', 'Extra section per page (menu, rooms, products)'] },
+  { id: 'website-premium', name: 'Website (Extended)', price: 300, blurb: 'Our largest tier: everything in Portfolio plus the biggest galleries (20–28 photos) and the deepest content.', category: 'website', stripePriceEnv: 'STRIPE_PRICE_WEBSITE_EXTENDED',
+    includes: ['Everything in Portfolio', 'Largest galleries — 20–28 of your photos', 'Deepest content on every page', 'Priority placement and captioning'] },
   { id: 'tuneup', name: 'Website tune-up', price: 100, unit: 'per visit', blurb: 'Refresh your site after a season change, menu update, or new product line.', category: 'website', stripePriceEnv: 'STRIPE_PRICE_TUNEUP',
     includes: ['Up to 3 hours of edits', 'Photo swap-outs', 'Copy refresh'] },
   { id: 'photo', name: 'Photo campaign', price: 100, blurb: 'A short photo session that delivers the 8 photos your Essentials site needs.', category: 'marketing', stripePriceEnv: 'STRIPE_PRICE_PHOTO',
@@ -48,6 +50,7 @@ export interface Bundle {
 export const BUNDLES: readonly Bundle[] = [
   { id: 'starter', name: 'Trinidad Starter', price: 350, items: ['Website (Essentials)', 'Photo campaign', 'Google Business Profile'], saves: 0, blurb: 'Everything a new business needs to be online and findable.', stripePriceEnv: 'STRIPE_PRICE_BUNDLE_STARTER' },
   { id: 'pro', name: 'Trinidad Portfolio', price: 450, items: ['Website (Portfolio)', 'Photo campaign (Extended)', 'Google Business Profile'], saves: 0, blurb: 'For established businesses ready to show their full story.', stripePriceEnv: 'STRIPE_PRICE_BUNDLE_PRO' },
+  { id: 'premium', name: 'Trinidad Extended', price: 600, items: ['Website (Extended)', 'Photo campaign (Extended)', 'Google Business Profile', 'Instagram + Google Reviews'], saves: 0, blurb: 'The complete package — our largest site, deepest content, and live social + review integrations.', stripePriceEnv: 'STRIPE_PRICE_BUNDLE_PREMIUM' },
 ] as const
 
 export function findPriceItem(id: string): PriceItem | undefined {

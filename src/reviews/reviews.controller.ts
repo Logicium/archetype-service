@@ -28,11 +28,23 @@ export class ReviewsService {
         params: { place_id: site.googlePlaceId, fields: ['reviews'], key },
       })
       const reviews = res.data.result.reviews ?? []
+      // Google is the source of truth for Google reviews: prune anything it
+      // no longer returns (edited/removed reviews, or rows cached from a
+      // previously connected business) instead of accumulating forever.
+      const keepIds = reviews.map(rv => `${site.googlePlaceId}:${rv.time}`)
+      await em.nativeDelete(Review, keepIds.length
+        ? { site: site.id, source: 'google', externalId: { $nin: keepIds } }
+        : { site: site.id, source: 'google' })
       let added = 0
       for (const rv of reviews) {
         const externalId = `${site.googlePlaceId}:${rv.time}`
         const existing = await em.getRepository(Review).findOne({ site: site.id, externalId })
-        if (existing) continue
+        if (existing) {
+          // Reviews are editable on Google — keep rating/text in sync.
+          existing.rating = rv.rating ?? existing.rating
+          existing.text = (rv.text ?? '').slice(0, 2000)
+          continue
+        }
         const row = em.getRepository(Review).create({
           site,
           source: 'google',

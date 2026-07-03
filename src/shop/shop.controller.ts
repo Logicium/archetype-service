@@ -15,6 +15,7 @@ import {
   ValidateNested,
 } from 'class-validator'
 import { Type } from 'class-transformer'
+import type { Request } from 'express'
 import { ShopService } from './shop.service'
 import type { ShopConfig } from '../entities/site.entity'
 import type { FulfillmentType, ShippingAddress } from '../entities/shop-order.entity'
@@ -60,6 +61,19 @@ export class ShopController {
   @Post('orders')
   createOrder(@Body() body: CreateShopOrderBody) {
     return this.shop.createOrder(body)
+  }
+
+  /** Create a pending order + Stripe Checkout session (destination charge to the site owner). */
+  @Post('checkout')
+  checkout(@Body() body: CreateShopOrderBody, @Req() req: Request) {
+    const origin = (req.headers.origin as string | undefined) || (req.headers.referer as string | undefined)
+    return this.shop.createCheckoutSession(body, origin)
+  }
+
+  /** Confirm payment on the storefront success redirect (verifies with Stripe). */
+  @Post('orders/:id/confirm')
+  confirm(@Param('id') id: string) {
+    return this.shop.confirmCheckout(id)
   }
 
   @Get('orders/:id')

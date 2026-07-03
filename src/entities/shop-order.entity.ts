@@ -68,6 +68,13 @@ export class ShopOrder {
   @Enum({ items: () => ['pending', 'paid', 'fulfilled', 'cancelled'] as ShopOrderStatus[] })
   status: ShopOrderStatus = 'pending'
 
+  /** Stripe Checkout session that will collect payment (destination charge to the site owner). */
+  @Property({ nullable: true })
+  stripeSessionId?: string
+
+  @Property({ nullable: true })
+  stripePaymentIntentId?: string
+
   @Property({ defaultRaw: 'NOW()' })
   createdAt: Date = new Date()
 
