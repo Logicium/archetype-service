@@ -122,17 +122,27 @@ export class PublicInstagramController {
   ) {}
 
   @Get(':key/instagram')
-  @Header('Cache-Control', 'public, max-age=900, s-maxage=900, stale-while-revalidate=3600')
-  async list(@Param('key') key: string) {
+  async list(@Param('key') key: string, @Res({ passthrough: true }) res: Response) {
+    // Empty results get a short cache so connecting Instagram shows up on the
+    // site within a minute; a populated feed can safely cache for 15 minutes.
+    const cache = (found: boolean) => res.setHeader(
+      'Cache-Control',
+      found
+        ? 'public, max-age=900, s-maxage=900, stale-while-revalidate=3600'
+        : 'public, max-age=60, s-maxage=60',
+    )
     const site = await this.sitesSvc.findByIdOrSlug(key)
-    if (!site.instagramToken) return { media: [] }
+    if (!site.instagramToken) { cache(false); return { media: [] } }
     try {
       const url = `https://graph.instagram.com/me/media?fields=id,media_type,media_url,permalink,caption,timestamp&access_token=${site.instagramToken}&limit=12`
-      const res = await fetch(url)
-      if (!res.ok) return { media: [] }
-      const data = await res.json() as { data: InstagramMedia[] }
-      return { media: data.data.filter(m => m.media_type === 'IMAGE' || m.media_type === 'CAROUSEL_ALBUM') }
+      const igRes = await fetch(url)
+      if (!igRes.ok) { cache(false); return { media: [] } }
+      const data = await igRes.json() as { data: InstagramMedia[] }
+      const media = data.data.filter(m => m.media_type === 'IMAGE' || m.media_type === 'CAROUSEL_ALBUM')
+      cache(media.length > 0)
+      return { media }
     } catch {
+      cache(false)
       return { media: [] }
     }
   }

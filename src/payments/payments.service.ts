@@ -30,9 +30,14 @@ export class PaymentsService {
     @InjectRepository(Owner) private readonly owners: EntityRepository<Owner>,
     private readonly em: EntityManager,
   ) {
-    const key = process.env.STRIPE_SECRET_KEY
+    // Vendor money runs on its own Stripe platform account when
+    // STRIPE_CONNECT_SECRET_KEY is set: Connect onboarding, bank attach, and
+    // every storefront checkout (destination charges) use this key, while the
+    // platform's own service billing (OrdersService) stays on
+    // STRIPE_SECRET_KEY. Leave it unset to run both on one account.
+    const key = process.env.STRIPE_CONNECT_SECRET_KEY || process.env.STRIPE_SECRET_KEY
     this.stripe = key ? new Stripe(key, { apiVersion: '2024-12-18.acacia' as Stripe.LatestApiVersion }) : null
-    if (!key) this.logger.warn('STRIPE_SECRET_KEY not set — Connect onboarding disabled.')
+    if (!key) this.logger.warn('STRIPE_CONNECT_SECRET_KEY / STRIPE_SECRET_KEY not set — Connect onboarding disabled.')
 
     const plaidClientId = process.env.PLAID_CLIENT_ID
     const plaidSecret = process.env.PLAID_SECRET
