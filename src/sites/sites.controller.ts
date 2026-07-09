@@ -76,6 +76,25 @@ export class AdminSitesController {
         void this.captureInBackground(s, url)
       }
     }
+    // Latest successful deploy activity per site (one grouped query).
+    const lastDeployBySite = new Map<string, string>()
+    if (sites.length) {
+      try {
+        const rows: Array<Record<string, unknown>> = await this.deployLogs
+          .createQueryBuilder('d')
+          .select(['d.site'])
+          .addSelect('max(d.created_at) as last')
+          .where({ site: { $in: sites.map(s => s.id) }, status: 'success' })
+          .groupBy('d.site')
+          .execute('all')
+        for (const r of rows) {
+          const key = (r.site ?? r.site_id) as string | undefined
+          const last = r.last as string | Date | undefined
+          if (key && last) lastDeployBySite.set(String(key), new Date(last).toISOString())
+        }
+      } catch { /* metadata only — never block the list */ }
+    }
+
     return sites.map(s => ({
       id: s.id,
       slug: s.slug,
@@ -88,6 +107,8 @@ export class AdminSitesController {
       screenshotUrl: s.screenshotUrl ?? null,
       screenshotCapturedAt: s.screenshotCapturedAt ?? null,
       addOns: s.addOns ?? [],
+      templateCommitSha: s.templateCommitSha ?? null,
+      lastDeployedAt: lastDeployBySite.get(s.id) ?? null,
     }))
   }
 
@@ -165,6 +186,10 @@ export class AdminSitesController {
       site.status = 'live'
       await this.sites.save(site)
     }
+    // Record the trigger so the site list's "last deployed" stays truthful.
+    const em = this.deployLogs.getEntityManager()
+    em.persist(this.deployLogs.create({ site, step: 'redeploy', status: 'success', message: `Triggered deployment ${dep.id}` }))
+    await em.flush()
     return { ok: true, deploymentId: dep.id, url: site.vercelProductionUrl ?? dep.url }
   }
 

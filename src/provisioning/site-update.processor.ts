@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common'
 import { EntityManager } from '@mikro-orm/postgresql'
 import { Job } from 'bullmq'
 import { Site } from '../entities/site.entity'
+import { DeployLog } from '../entities/misc.entity'
 import { GitHubProvisioner } from './github.provisioner'
 import { VercelProvisioner } from './vercel.provisioner'
 import { SITE_UPDATE_QUEUE } from './provisioning.constants'
@@ -71,6 +72,14 @@ export class SiteUpdateProcessor extends WorkerHost {
     if (site.vercelProjectId) {
       const info = await this.github.getRepoInfo(site.githubRepo)
       await this.vercel.redeploy(site.vercelProjectId, site.githubRepo, info.repoId, info.defaultBranch)
+      // Record the update so the site list's "last deployed" stays truthful.
+      em.persist(em.create(DeployLog, {
+        site,
+        step: 'template-update',
+        status: 'success',
+        message: `Synced ${synced} file(s) from template @${latestSha.slice(0, 7)}`,
+      }))
+      await em.flush()
     }
 
     this.logger.log(`update site=${site.slug} done synced=${synced} skipped=${skipped}`)
