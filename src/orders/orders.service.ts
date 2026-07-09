@@ -96,6 +96,9 @@ export class OrdersService {
       success_url: successUrl,
       cancel_url: cancelUrl,
       metadata: { orderId: order.id },
+      // Shows Stripe Checkout's built-in promo-code field. Codes are managed
+      // in the Stripe dashboard (coupon → promotion code).
+      allow_promotion_codes: true,
     })
     order.stripeSessionId = session.id
     await this.em.persistAndFlush(order)
@@ -268,7 +271,8 @@ export class OrdersService {
     if (!this.stripe) throw new BadRequestException('Stripe not configured')
     if (!order.stripeSessionId) throw new BadRequestException('Order has no Stripe session')
     const session = await this.stripe.checkout.sessions.retrieve(order.stripeSessionId)
-    if (session.payment_status !== 'paid') {
+    // 'no_payment_required' = session completed at $0 (100%-off promo code).
+    if (session.payment_status !== 'paid' && session.payment_status !== 'no_payment_required') {
       throw new BadRequestException(`Stripe session payment_status=${session.payment_status}; refusing to mark paid`)
     }
     if (order.status === 'pending') {
@@ -311,7 +315,7 @@ export class OrdersService {
           .map(e => ({ id: e.id, type: e.type, created: e.created }))
       } catch { /* event listing is optional */ }
 
-      const paidButOrderStuck = session.payment_status === 'paid' && order.status === 'pending'
+      const paidButOrderStuck = (session.payment_status === 'paid' || session.payment_status === 'no_payment_required') && order.status === 'pending'
 
       return {
         ...base,
