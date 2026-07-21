@@ -33,6 +33,17 @@ async function bootstrap() {
     ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "bank_mask" varchar(255) NULL;
     ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "stripe_session_id" varchar(255) NULL;
     ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "stripe_payment_intent_id" varchar(255) NULL;
+    CREATE TABLE IF NOT EXISTS "${schema}"."page_hit" (
+      "id" uuid NOT NULL PRIMARY KEY,
+      "site_id" uuid NOT NULL,
+      "path" varchar(512) NOT NULL,
+      "referrer_host" varchar(255) NULL,
+      "device" varchar(16) NOT NULL,
+      "visitor_hash" varchar(64) NOT NULL,
+      "created_at" timestamptz NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS "page_hit_site_created_idx" ON "${schema}"."page_hit" ("site_id", "created_at");
+    CREATE INDEX IF NOT EXISTS "page_hit_visitor_idx" ON "${schema}"."page_hit" ("visitor_hash");
   `)
 
   app.use(helmet({ contentSecurityPolicy: false }))

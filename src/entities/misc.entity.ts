@@ -119,6 +119,46 @@ export class SiteMetric {
   uptimeError?: string
 }
 
+export type DeviceKind = 'desktop' | 'mobile' | 'tablet'
+
+/**
+ * One row per public pageview on a deployed site. Cookieless: `visitorHash`
+ * is a per-day salted digest of IP+UA+site, so distinct visitors can be
+ * counted without any tracking identifier crossing day boundaries or sites.
+ * Raw hits power the breakdowns (top pages, sources, devices, hour-of-day);
+ * the daily rollup lives on SiteMetric for cheap trend queries.
+ */
+@Entity()
+@Index({ properties: ['site', 'createdAt'] })
+export class PageHit {
+  [OptionalProps]?: 'createdAt'
+
+  @PrimaryKey({ type: 'uuid' })
+  id: string = randomUUID()
+
+  @ManyToOne(() => Site)
+  @Index()
+  site!: Site
+
+  @Property({ length: 512 })
+  path!: string
+
+  /** Referrer host only (no full URL, no query) — or null for direct traffic. */
+  @Property({ nullable: true, length: 255 })
+  referrerHost?: string
+
+  @Enum({ items: () => ['desktop', 'mobile', 'tablet'] as DeviceKind[] })
+  device!: DeviceKind
+
+  @Property({ length: 64 })
+  @Index()
+  visitorHash!: string
+
+  @Property({ defaultRaw: 'NOW()' })
+  @Index()
+  createdAt: Date = new Date()
+}
+
 @Entity()
 export class AuditEvent {
   [OptionalProps]?: 'createdAt'
