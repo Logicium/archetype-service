@@ -129,7 +129,13 @@ export type DeviceKind = 'desktop' | 'mobile' | 'tablet'
  * the daily rollup lives on SiteMetric for cheap trend queries.
  */
 @Entity()
-@Index({ properties: ['site', 'createdAt'] })
+// Index names are pinned to what the boot-time SQL in main.ts actually created
+// (`page_hit_site_created_idx`, `page_hit_visitor_idx`). Without these explicit
+// names MikroORM's schema diff tries to RENAME them to its own defaults, and its
+// `ALTER INDEX … RENAME` isn't schema-qualified — so on the non-default
+// `archetype` schema it fails with 42P01 "relation does not exist". Matching the
+// names keeps `schema:update` a clean no-op for these two indexes.
+@Index({ properties: ['site', 'createdAt'], name: 'page_hit_site_created_idx' })
 export class PageHit {
   [OptionalProps]?: 'createdAt'
 
@@ -151,7 +157,7 @@ export class PageHit {
   device!: DeviceKind
 
   @Property({ length: 64 })
-  @Index()
+  @Index({ name: 'page_hit_visitor_idx' })
   visitorHash!: string
 
   @Property({ defaultRaw: 'NOW()' })
