@@ -241,6 +241,8 @@ export class AdminSitesController {
       latest,
       hasUpdate: !!site.templateCommitSha && site.templateCommitSha !== latest,
       neverChecked: !site.templateCommitSha,
+      autoUpdate: site.autoUpdate,
+      lastAutoUpdateAt: site.lastAutoUpdateAt ?? null,
     }
   }
 
@@ -250,6 +252,15 @@ export class AdminSitesController {
     const site = await this.sites.getOwned(id, req.owner)
     const job = await this.updateQueue.add(SITE_UPDATE_JOB, { siteId: site.id }, { removeOnComplete: 50, removeOnFail: 50 })
     return { ok: true, jobId: job.id }
+  }
+
+  /** Enroll (default) or opt out of automatic template updates. */
+  @Post(':id/auto-update')
+  async setAutoUpdate(@Param('id') id: string, @Body() body: { enabled?: boolean }, @Req() req: AuthRequest) {
+    const site = await this.sites.getOwned(id, req.owner)
+    site.autoUpdate = body.enabled !== false
+    await this.sites.save(site)
+    return { ok: true, autoUpdate: site.autoUpdate }
   }
 
   /**

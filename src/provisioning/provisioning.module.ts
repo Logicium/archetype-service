@@ -7,6 +7,7 @@ import { SiteContent } from '../entities/site-content.entity'
 import { DeployLog } from '../entities/misc.entity'
 import { ProvisioningProcessor } from './provisioning.processor'
 import { SiteUpdateProcessor } from './site-update.processor'
+import { SiteUpdateSchedulerService } from './site-update-scheduler.service'
 import { GitHubProvisioner } from './github.provisioner'
 import { VercelProvisioner } from './vercel.provisioner'
 import { SiteCopyGenerator } from './site-copy.generator'
@@ -19,7 +20,7 @@ import { PROVISION_QUEUE, SITE_UPDATE_QUEUE } from './provisioning.constants'
     BullModule.registerQueue({ name: PROVISION_QUEUE }, { name: SITE_UPDATE_QUEUE }),
     AiModule,
   ],
-  providers: [ProvisioningProcessor, SiteUpdateProcessor, GitHubProvisioner, VercelProvisioner, SiteCopyGenerator],
+  providers: [ProvisioningProcessor, SiteUpdateProcessor, SiteUpdateSchedulerService, GitHubProvisioner, VercelProvisioner, SiteCopyGenerator],
   exports: [GitHubProvisioner, VercelProvisioner, BullModule],
 })
 export class ProvisioningModule {}

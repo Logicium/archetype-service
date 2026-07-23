@@ -67,6 +67,25 @@ export class SitesService {
     return site
   }
 
+  /**
+   * Owner-requested data deletion (self-service, safe). Immediately takes every
+   * one of the owner's sites offline and severs connected third-party data
+   * (Instagram + Google tokens/ids are wiped from our store right away). The
+   * permanent row-level purge is completed out of band within the retention
+   * window. Returns the affected sites so the caller can notify + log.
+   */
+  async purgeOwnerSiteData(owner: Owner): Promise<Site[]> {
+    const list = await this.listForOwner(owner, { includeDeactivated: true })
+    for (const site of list) {
+      site.instagramToken = undefined
+      site.instagramTokenExpiresAt = undefined
+      site.googlePlaceId = undefined
+      if (!site.deactivatedAt) site.deactivatedAt = new Date()
+    }
+    if (list.length) await this.em.flush()
+    return list
+  }
+
   /** Auto-source displayName from siteConfig.brand on first publish if not already set. */
   async ensureDisplayNameFromPayload(site: Site, payload: Record<string, unknown> | undefined): Promise<void> {
     if (site.displayName || !payload) return

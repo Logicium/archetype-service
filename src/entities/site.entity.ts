@@ -104,7 +104,7 @@ export interface OrderingConfig {
 
 @Entity()
 export class Site {
-  [OptionalProps]?: 'createdAt' | 'updatedAt' | 'plan' | 'status' | 'addOns'
+  [OptionalProps]?: 'createdAt' | 'updatedAt' | 'plan' | 'status' | 'addOns' | 'autoUpdate'
 
   @PrimaryKey({ type: 'uuid' })
   id: string = randomUUID()
@@ -148,6 +148,16 @@ export class Site {
   /** SHA of the template repo's default branch at provision time — used to detect updates. */
   @Property({ nullable: true })
   templateCommitSha?: string
+
+  /** Sites are enrolled in automatic template updates by default: the scheduler
+   *  syncs + redeploys them whenever the template repo advances. Owners can opt
+   *  out to pin their current version. */
+  @Property({ default: true })
+  autoUpdate: boolean = true
+
+  /** Last time the auto-update scheduler triggered a sync for this site. */
+  @Property({ nullable: true })
+  lastAutoUpdateAt?: Date
 
   @Property({ nullable: true })
   customDomain?: string
