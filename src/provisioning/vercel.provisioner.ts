@@ -12,9 +12,14 @@ function pickProductionAlias(aliases?: string[]): string | undefined {
   const cleaned = aliases.filter(Boolean)
   const custom = cleaned.find(a => !a.endsWith('.vercel.app'))
   if (custom) return custom
-  return cleaned
-    .filter(a => a.endsWith('.vercel.app'))
-    .sort((a, b) => a.length - b.length)[0]
+  // Per-deployment / preview aliases (`…-git-main-…`, `…-<hash>-<scope>.vercel.app`)
+  // are gated by Vercel deployment protection and 401 for logged-out visitors.
+  // Only the canonical `<project>.vercel.app` alias is public — it's the one with
+  // no extra hyphen-delimited scope segment. Prefer those; fall back to shortest.
+  const vercelAliases = cleaned.filter(a => a.endsWith('.vercel.app'))
+  const isDeploymentStyle = (a: string) => /-git-/.test(a) || a.split('.')[0]!.split('-').length > 3
+  const publicAliases = vercelAliases.filter(a => !isDeploymentStyle(a))
+  return (publicAliases.length ? publicAliases : vercelAliases).sort((a, b) => a.length - b.length)[0]
 }
 
 /** Thin wrapper around the Vercel REST API (https://vercel.com/docs/rest-api).
@@ -247,21 +252,24 @@ export class VercelProvisioner {
         const detail = await this.req<{ alias?: string[] }>('GET', `/v13/deployments/${latest.uid}`).catch(() => null)
         const alias = pickProductionAlias(detail?.alias)
         if (alias) return `https://${alias}`
-        // Fall back to deployment-specific URL if no aliases are set yet
-        if (latest.url) return `https://${latest.url}`
+        // Deliberately DON'T fall back to `latest.url` (the `<project>-<hash>-<scope>`
+        // deployment URL) — it's gated by deployment protection and 401s for the
+        // customer. Fall through to the project's canonical alias instead.
       }
     } catch (e) {
       this.logger.warn(`getProductionUrl deployments lookup: ${(e as Error).message}`)
     }
 
-    // 2) Project targets.production.alias
+    // 2) Project targets.production.alias, else synthesize the canonical public alias.
     try {
       const proj = await this.req<{ name: string; targets?: { production?: { alias?: string[] } } }>(
         'GET', `/v9/projects/${projectId}`,
       )
       const alias = pickProductionAlias(proj.targets?.production?.alias)
       if (alias) return `https://${alias}`
-      // 3) Last resort: project name
+      // 3) Last resort: the public `<project>.vercel.app` alias Vercel always assigns.
+      //    This is the stable public URL even before the alias list is populated —
+      //    never a protected per-deployment URL.
       if (proj.name) return `https://${proj.name}.vercel.app`
     } catch (e) {
       this.logger.warn(`getProductionUrl project lookup: ${(e as Error).message}`)

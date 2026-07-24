@@ -7,6 +7,10 @@ export interface MailMessage {
   html: string
   /** When true, BCC the platform admin. */
   ccAdmin?: boolean
+  /** Override the From header (e.g. send "personally" as the owner). */
+  from?: string
+  /** Where replies should land (e.g. the owner's business inbox). */
+  replyTo?: string
 }
 
 /**
@@ -39,9 +43,10 @@ export class EmailService {
     const admin = process.env.ADMIN_EMAIL || 'kisora@apotomelabs.com'
     try {
       await this.transporter.sendMail({
-        from: process.env.EMAIL_FROM || 'noreply@apotomelabs.com',
+        from: msg.from || process.env.EMAIL_FROM || 'noreply@apotomelabs.com',
         to: msg.to,
         cc: msg.ccAdmin ? admin : undefined,
+        replyTo: msg.replyTo,
         subject: msg.subject,
         html: msg.html,
       })

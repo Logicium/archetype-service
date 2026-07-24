@@ -9,6 +9,8 @@ import { DeployLog } from '../entities/misc.entity'
 import { GitHubProvisioner } from './github.provisioner'
 import { VercelProvisioner } from './vercel.provisioner'
 import { EmailService } from '../common/email.service'
+import { brandedEmail, emailButton, emailHeading, emailLineItems } from '../common/email-template'
+import { summarizeOrder } from './order-summary.util'
 import { PROVISION_JOB, PROVISION_QUEUE } from './provisioning.constants'
 import { resolveDeployedContentApiUrl } from './content-api.util'
 import { normalizeWizardPayload } from './wizard-payload.util'
@@ -207,18 +209,70 @@ export class ProvisioningProcessor extends WorkerHost {
       return dep
     })
 
-    // Step 6 — notify owner with magic-link to the admin area.
+    // Step 6 — the welcome sequence: a branded customer welcome, a new-client
+    // heads-up to the owner, and a personal (reply-able) note from the owner.
     await step('notify-owner', async () => {
       const productionUrl = site!.vercelProductionUrl ?? '(deploying)'
-      await this.email.send({
+      const dashboardUrl = `${productionUrl}/admin`
+      const firstName = (order.owner.name || '').split(' ')[0] || 'there'
+      const businessName = ((seededConfig as Record<string, unknown>).brand as string) || site!.slug
+      const ownerEmail = process.env.OWNER_EMAIL || process.env.ADMIN_EMAIL || 'kisora@apotomelabs.com'
+      const ownerName = process.env.OWNER_NAME || 'Kisora'
+      const bookingUrl = process.env.OWNER_BOOKING_URL || 'https://apotomelabs.com/contact'
+      const ARCHETYPE_NOUN: Record<string, string> = {
+        mesa: 'restaurant', hearth: 'stay', vault: 'shop', keystone: 'trade', marquee: 'venue',
+      }
+      const noun = ARCHETYPE_NOUN[site!.archetype] || 'business'
+      const linkStyle = 'color:#6366f1;text-decoration:none;font-weight:600;'
+      const results: string[] = []
+
+      // 1 · Customer welcome — platform voice.
+      results.push(String(await this.email.send({
         to: order.owner.email,
-        subject: `Your ${site!.slug} site is live`,
-        html: `<p>Hi${order.owner.name ? ' ' + order.owner.name : ''},</p>
-          <p>Your new site is live at <a href="${productionUrl}">${productionUrl}</a>.</p>
-          <p>Sign in to your dashboard at ${productionUrl}/admin to edit content, swap photos, change themes, and view form submissions.</p>`,
-        ccAdmin: true,
-      })
-      return 'sent'
+        subject: `Welcome to Apotome: ${businessName} is live 🎉`,
+        html: brandedEmail(
+          emailHeading('Your website is live.') +
+          `<p>Hi ${firstName}, welcome to Apotome. Your ${noun} site for <strong>${businessName}</strong> is built, live, and yours.</p>` +
+          `<p style="margin:24px 0;">${emailButton('Visit your site', productionUrl)}&nbsp;&nbsp;&nbsp;<a href="${dashboardUrl}" style="${linkStyle}">Open your dashboard →</a></p>` +
+          `<p>From your dashboard you can edit your words and photos, switch themes and colors, read messages from visitors, and see who's stopping by. No code, and every change goes live in seconds.</p>` +
+          `<p>Google Maps, your Instagram feed, and live Google reviews are already built in. We're glad you're here.</p>`,
+          { preheader: `${businessName} is live on Apotome.` },
+        ),
+      })))
+
+      // 2 · Owner heads-up — new client + what they bought.
+      const summary = summarizeOrder(order.plan, order.addOns)
+      results.push(String(await this.email.send({
+        to: ownerEmail,
+        subject: `New client: ${businessName} (${summary.planLabel})`,
+        html: brandedEmail(
+          emailHeading('New client 🎉') +
+          `<p><strong>${businessName}</strong> just signed up.</p>` +
+          `<p style="margin:0 0 4px;">Client: ${order.owner.name || 'Not provided'} &lt;${order.owner.email}&gt;<br>Archetype: ${site!.archetype}</p>` +
+          emailLineItems(summary.lines) +
+          `<p style="margin-top:22px;">${emailButton('View their site', productionUrl)}&nbsp;&nbsp;&nbsp;<a href="${dashboardUrl}" style="${linkStyle}">Their dashboard →</a></p>`,
+          { preheader: `${businessName}: ${summary.planLabel}, $${summary.total}` },
+        ),
+      })))
+
+      // 3 · Personal welcome from the owner — replies land in the business inbox.
+      results.push(String(await this.email.send({
+        to: order.owner.email,
+        from: `${ownerName} at Apotome Labs <${ownerEmail}>`,
+        replyTo: ownerEmail,
+        subject: `A personal welcome from ${ownerName} at Apotome Labs`,
+        html: brandedEmail(
+          `<p>Hi ${firstName},</p>` +
+          `<p>It's ${ownerName}, founder of Apotome Labs here in Trinidad. I wanted to welcome you myself and to thank you for trusting us with ${businessName}.</p>` +
+          `<p>If you'd like a hand getting set up, have any questions, or ever need support down the road, I'd love to help. Grab a time that works for you and we'll walk through it together, no rush and no pressure.</p>` +
+          `<p style="margin:24px 0;">${emailButton('Book a time with me', bookingUrl)}</p>` +
+          `<p>You can also just reply to this email. It comes straight to my inbox and I read every one.</p>` +
+          `<p style="margin-bottom:0;">Talk soon,<br><strong>${ownerName}</strong><br><span style="color:#a1a1aa;">Founder, Apotome Labs · Trinidad</span></p>`,
+          { preheader: `A quick hello from ${ownerName}, and a hand getting set up.`, footNote: `Sent by ${ownerName}, Founder of Apotome Labs · Trinidad, Colorado · reply anytime` },
+        ),
+      })))
+
+      return `welcome+owner+personal: ${results.join(',')}`
     })
 
     order.status = 'live'
