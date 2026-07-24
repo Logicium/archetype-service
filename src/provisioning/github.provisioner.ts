@@ -147,4 +147,34 @@ export class GitHubProvisioner {
       })
     }
   }
+
+  /**
+   * Commit MANY files as a single atomic commit (Git Data API: blobs → tree →
+   * commit → ref). Unlike calling putFileBase64 per file — which creates one
+   * commit each and makes Git-connected CI (Vercel) build every intermediate,
+   * inconsistent state — this lands one build-clean commit. Returns the new
+   * commit SHA, or null if there was nothing to do.
+   */
+  async commitFiles(
+    owner: string, repo: string, branch: string,
+    files: Array<{ path: string; contentBase64: string }>,
+    message: string,
+  ): Promise<string | null> {
+    if (!this.client || files.length === 0) return null
+    const ref = await this.client.git.getRef({ owner, repo, ref: `heads/${branch}` })
+    const baseCommitSha = ref.data.object.sha
+    const baseCommit = await this.client.git.getCommit({ owner, repo, commit_sha: baseCommitSha })
+
+    // One blob per file, then a tree layered on the existing one so untouched
+    // files are preserved.
+    const tree: Array<{ path: string; mode: '100644'; type: 'blob'; sha: string }> = []
+    for (const f of files) {
+      const blob = await this.client.git.createBlob({ owner, repo, content: f.contentBase64, encoding: 'base64' })
+      tree.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.data.sha })
+    }
+    const newTree = await this.client.git.createTree({ owner, repo, base_tree: baseCommit.data.tree.sha, tree })
+    const commit = await this.client.git.createCommit({ owner, repo, message, tree: newTree.data.sha, parents: [baseCommitSha] })
+    await this.client.git.updateRef({ owner, repo, ref: `heads/${branch}`, sha: commit.data.sha })
+    return commit.data.sha
+  }
 }

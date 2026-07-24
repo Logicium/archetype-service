@@ -50,7 +50,11 @@ export class SiteUpdateProcessor extends WorkerHost {
     const templateFiles = await this.github.listAllFiles(templateOwner, templateRepo, template.defaultBranch)
     const customerFiles = new Set(await this.github.listAllFiles(owner, repoName, customer.defaultBranch))
 
-    let synced = 0
+    // Collect every changed file first, then land them in ONE atomic commit.
+    // Committing per-file (the old way) made Vercel's Git integration build each
+    // intermediate commit, and those are broken (e.g. a component synced before
+    // the new module it imports) — which is what crashed the auto-update deploys.
+    const changed: Array<{ path: string; contentBase64: string }> = []
     let skipped = 0
     for (const path of templateFiles) {
       if (isProtected(path)) { skipped++; continue }
@@ -61,8 +65,11 @@ export class SiteUpdateProcessor extends WorkerHost {
         const current = await this.github.getFileBase64(owner, repoName, path, customer.defaultBranch)
         if (current === content) continue
       }
-      await this.github.putFileBase64(owner, repoName, path, content, `chore: sync from template ${latestSha.slice(0, 7)}`)
-      synced++
+      changed.push({ path, contentBase64: content })
+    }
+    const synced = changed.length
+    if (synced > 0) {
+      await this.github.commitFiles(owner, repoName, customer.defaultBranch, changed, `chore: sync from template ${latestSha.slice(0, 7)}`)
     }
 
     site.templateCommitSha = latestSha
