@@ -10,6 +10,8 @@ export interface PriceItem {
   unit?: string
   blurb: string
   featured?: boolean
+  /** Sold only as an upgrade to an existing site — hidden from new-build pricing. */
+  upgradeOnly?: boolean
   category: PriceCategory
   includes?: string[]
   /** Optional: env var name holding the Stripe Price ID for this SKU. */
@@ -21,6 +23,11 @@ export const PRICING: PriceItem[] = [
     includes: ['Choice of three design themes (Studio, Heritage, Vibrant)', 'Choice of eight color swatches', 'Hosted, fast, mobile-ready', '6–8 of your photos placed and captioned', 'Hours, contact, and map embedded'] },
   { id: 'website-extended', name: 'Website (Portfolio)', price: 250, blurb: 'The extended template with a dedicated gallery and 12–16 photos.', category: 'website', stripePriceEnv: 'STRIPE_PRICE_WEBSITE_PORTFOLIO',
     includes: ['Everything in Essentials', 'Dedicated gallery / lookbook page', '12–16 of your photos placed and captioned', 'Extra section per page (menu, rooms, products)'] },
+  /* Upgrade-only SKU: the DIFFERENCE between Essentials ($200) and Portfolio
+     ($250), for owners who already bought an Essentials site. Never offered
+     as a new build — see the upgrade-checkout allow-list. */
+  { id: 'website-portfolio-upgrade', name: 'Portfolio upgrade', price: 50, blurb: 'Upgrade an existing Essentials site to Portfolio.', category: 'website', upgradeOnly: true, stripePriceEnv: 'STRIPE_PRICE_WEBSITE_PORTFOLIO_UPGRADE',
+    includes: ['Hero photo carousel', 'Dedicated gallery / lookbook page', 'Up to 16 photo slots'] },
   { id: 'website-premium', name: 'Website (Extended)', price: 300, blurb: 'Our largest tier: everything in Portfolio plus the biggest galleries (20–28 photos) and the deepest content.', category: 'website', stripePriceEnv: 'STRIPE_PRICE_WEBSITE_EXTENDED',
     includes: ['Everything in Portfolio', 'Largest galleries — 20–28 of your photos', 'Deepest content on every page', 'Priority placement and captioning'] },
   { id: 'tuneup', name: 'Website tune-up', price: 100, unit: 'per visit', blurb: 'Refresh your site after a season change, menu update, or new product line.', category: 'website', stripePriceEnv: 'STRIPE_PRICE_TUNEUP',

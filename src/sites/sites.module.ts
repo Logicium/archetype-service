@@ -6,6 +6,7 @@ import { SiteContent } from '../entities/site-content.entity'
 import { DeployLog } from '../entities/misc.entity'
 import { SitesService } from './sites.service'
 import { AdminSitesController, PublicSitesController } from './sites.controller'
+import { GbpController } from './gbp.controller'
 import { AuthModule } from '../auth/auth.module'
 import { ProvisioningModule } from '../provisioning/provisioning.module'
 import { SITE_UPDATE_QUEUE } from '../provisioning/provisioning.constants'
@@ -21,7 +22,7 @@ import { OrdersModule } from '../orders/orders.module'
     ScreenshotModule,
     OrdersModule,
   ],
-  controllers: [PublicSitesController, AdminSitesController],
+  controllers: [PublicSitesController, AdminSitesController, GbpController],
   providers: [SitesService],
   exports: [SitesService],
 })

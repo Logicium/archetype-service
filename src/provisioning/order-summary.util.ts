@@ -11,6 +11,7 @@ const CATALOG: Record<string, CatalogItem> = {
   // Websites
   'website': { label: 'Website (Essentials)', price: 200 },
   'website-extended': { label: 'Website (Portfolio)', price: 250 },
+  'website-portfolio-upgrade': { label: 'Portfolio upgrade', price: 50 },
   'tuneup': { label: 'Website tune-up', price: 100 },
   // Marketing
   'photo': { label: 'Photo campaign', price: 100 },

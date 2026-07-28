@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Param, Post, Put, Req, UseGuards } from '@nestjs/common'
+import { BadRequestException, Body, Controller, Get, Header, Param, Post, Put, Req, UseGuards } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import { InjectRepository } from '@mikro-orm/nestjs'
 import { EntityRepository } from '@mikro-orm/postgresql'
@@ -77,22 +77,30 @@ export class AdminSitesController {
       }
     }
     // Latest successful deploy activity per site (one grouped query).
+    // Plain SQL: the query-builder version silently failed on the aggregate
+    // select, which left every card showing "deployed —" forever.
     const lastDeployBySite = new Map<string, string>()
     if (sites.length) {
       try {
-        const rows: Array<Record<string, unknown>> = await this.deployLogs
-          .createQueryBuilder('d')
-          .select(['d.site'])
-          .addSelect('max(d.created_at) as last')
-          .where({ site: { $in: sites.map(s => s.id) }, status: 'success' })
-          .groupBy('d.site')
-          .execute('all')
+        const ids = sites.map(s => s.id)
+        const placeholders = ids.map(() => '?').join(', ')
+        const rows: Array<{ site_id: string; last: string | Date }> = await this.deployLogs
+          .getEntityManager()
+          .getConnection()
+          .execute(
+            `select site_id, max(created_at) as last
+               from deploy_log
+              where status = 'success' and site_id in (${placeholders})
+              group by site_id`,
+            ids,
+          )
         for (const r of rows) {
-          const key = (r.site ?? r.site_id) as string | undefined
-          const last = r.last as string | Date | undefined
-          if (key && last) lastDeployBySite.set(String(key), new Date(last).toISOString())
+          if (r.site_id && r.last) lastDeployBySite.set(String(r.site_id), new Date(r.last).toISOString())
         }
-      } catch { /* metadata only — never block the list */ }
+      } catch (e) {
+        // Metadata only — never block the list, but do say why it's missing.
+        console.warn('[sites.list] last-deploy lookup failed:', e instanceof Error ? e.message : e)
+      }
     }
 
     return sites.map(s => ({
@@ -107,6 +115,7 @@ export class AdminSitesController {
       screenshotUrl: s.screenshotUrl ?? null,
       screenshotCapturedAt: s.screenshotCapturedAt ?? null,
       addOns: s.addOns ?? [],
+      plan: s.plan ?? 'essentials',
       templateCommitSha: s.templateCommitSha ?? null,
       lastDeployedAt: lastDeployBySite.get(s.id) ?? null,
     }))
@@ -115,6 +124,27 @@ export class AdminSitesController {
   @Get(':id')
   async detail(@Param('id') id: string, @Req() req: AuthRequest) {
     return this.sites.getOwned(id, req.owner)
+  }
+
+  /** Checkout for upgrades on an existing site (portfolio, photo campaigns). */
+  @Post(':id/upgrade-checkout')
+  async upgradeCheckout(
+    @Param('id') id: string,
+    @Body() body: { items?: string[]; origin?: string },
+    @Req() req: AuthRequest,
+  ) {
+    const site = await this.sites.getOwned(id, req.owner)
+    // Owners upgrading an existing site pay the DIFFERENCE, not the full
+    // Portfolio build price — so the upgrade SKU is what's purchasable here.
+    const ALLOWED = ['website-portfolio-upgrade', 'photo', 'photo-extended']
+    const items = (body.items ?? []).filter(i => ALLOWED.includes(i))
+    if (!items.length) throw new BadRequestException('No purchasable items in request')
+    return this.orders.createUpgradeCheckout(
+      { id: site.id, slug: site.slug, archetype: site.archetype },
+      req.owner,
+      items,
+      body.origin,
+    )
   }
 
   @Get(':id/content/draft')

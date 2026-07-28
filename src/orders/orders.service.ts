@@ -154,10 +154,81 @@ export class OrdersService {
         order.status = 'paid'
         order.stripeCustomerId = typeof session.customer === 'string' ? session.customer : undefined
         await this.em.persistAndFlush(order)
-        await this.enqueueProvisioning(order)
-        await this.sendOwnerLoginEmail(order.owner).catch(e => this.logger.warn(`Login email failed: ${(e as Error).message}`))
+        if ((order.wizardPayload as { upgradeSiteId?: string } | undefined)?.upgradeSiteId) {
+          // Upgrade purchase for an EXISTING site — no provisioning.
+          await this.applyUpgrade(order)
+        } else {
+          await this.enqueueProvisioning(order)
+          await this.sendOwnerLoginEmail(order.owner).catch(e => this.logger.warn(`Login email failed: ${(e as Error).message}`))
+        }
       }
     }
+  }
+
+  /**
+   * Checkout for an EXISTING site: plan upgrades (portfolio) and one-off
+   * services (photo campaigns). Reuses the same order + Stripe pipeline so
+   * purchases land in the owner's Billing history; on payment the site is
+   * upgraded in place instead of provisioning a new one.
+   */
+  async createUpgradeCheckout(
+    site: { id: string; slug: string; archetype: CreateCheckoutInput['archetype'] },
+    owner: Owner,
+    items: string[],
+    origin?: string,
+  ) {
+    if (!items.length) throw new BadRequestException('Nothing to purchase')
+    const [plan, ...addOns] = items as [string, ...string[]]
+    const order = this.orders.create({
+      owner,
+      archetype: site.archetype,
+      plan,
+      addOns,
+      wizardPayload: { upgradeSiteId: site.id, siteSlug: site.slug },
+      status: 'pending',
+    })
+    await this.em.persistAndFlush(order)
+
+    if (!this.stripe) {
+      order.status = 'paid'
+      await this.em.persistAndFlush(order)
+      await this.applyUpgrade(order)
+      return { orderId: order.id, checkoutUrl: null, dryRun: true }
+    }
+
+    const base = sanitizeOrigin(origin)
+    const successUrl = `${base || 'http://localhost:5173'}/admin/billing?upgrade=success&order=${order.id}`
+    const cancelUrl = `${base || 'http://localhost:5173'}/admin/billing?upgrade=cancelled`
+    const session = await this.stripe.checkout.sessions.create({
+      mode: 'payment',
+      customer_email: owner.email,
+      line_items: this.resolveLineItems(plan, addOns),
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: { orderId: order.id },
+      allow_promotion_codes: true,
+    })
+    order.stripeSessionId = session.id
+    await this.em.persistAndFlush(order)
+    return { orderId: order.id, checkoutUrl: session.url }
+  }
+
+  /** Applies a paid upgrade order to its site (currently: portfolio plan). */
+  private async applyUpgrade(order: Order) {
+    const siteId = (order.wizardPayload as { upgradeSiteId?: string } | undefined)?.upgradeSiteId
+    if (!siteId) return
+    const { Site } = await import('../entities/site.entity')
+    const site = await this.em.findOne(Site, { id: siteId })
+    if (!site) {
+      this.logger.warn(`Upgrade order ${order.id} references missing site ${siteId}`)
+      return
+    }
+    const purchased = [order.plan, ...order.addOns]
+    if (purchased.includes('website-portfolio-upgrade') || purchased.includes('website-extended')) {
+      site.plan = 'portfolio'
+      this.logger.log(`Site ${site.slug} upgraded to portfolio (order ${order.id})`)
+    }
+    await this.em.persistAndFlush(site)
   }
 
   /** After a successful purchase, email the owner a magic sign-in link so
