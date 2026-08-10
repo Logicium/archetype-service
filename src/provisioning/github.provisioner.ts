@@ -14,14 +14,28 @@ export class GitHubProvisioner {
     if (!token) this.logger.warn('GITHUB_TOKEN not set — GitHub provisioning will be skipped')
   }
 
+  /**
+   * The GitHub template repo each archetype is cloned from.
+   *
+   * These defaults MUST match the repos the monorepo publishes to (see
+   * .github/workflows/publish-templates.yml, which targets `archetype-{kind}-ui`).
+   * They previously defaulted to `archetype-{kind}-template-ui`, which does not
+   * exist — so any environment missing the GITHUB_TEMPLATE_* vars failed every
+   * purchase with a bare "Not Found" from the create-from-template endpoint.
+   */
   templateFor(kind: 'mesa' | 'hearth' | 'vault' | 'marquee' | 'keystone'): string {
     switch (kind) {
-      case 'mesa': return process.env.GITHUB_TEMPLATE_MESA || 'archetype-mesa-template-ui'
-      case 'hearth': return process.env.GITHUB_TEMPLATE_HEARTH || 'archetype-hearth-template-ui'
-      case 'vault': return process.env.GITHUB_TEMPLATE_VAULT || 'archetype-vault-template-ui'
-      case 'marquee': return process.env.GITHUB_TEMPLATE_MARQUEE || 'archetype-marquee-template-ui'
-      case 'keystone': return process.env.GITHUB_TEMPLATE_KEYSTONE || 'archetype-keystone-template-ui'
+      case 'mesa': return process.env.GITHUB_TEMPLATE_MESA || 'archetype-mesa-ui'
+      case 'hearth': return process.env.GITHUB_TEMPLATE_HEARTH || 'archetype-hearth-ui'
+      case 'vault': return process.env.GITHUB_TEMPLATE_VAULT || 'archetype-vault-ui'
+      case 'marquee': return process.env.GITHUB_TEMPLATE_MARQUEE || 'archetype-marquee-ui'
+      case 'keystone': return process.env.GITHUB_TEMPLATE_KEYSTONE || 'archetype-keystone-ui'
     }
+  }
+
+  /** Env var name that overrides the template repo for an archetype. */
+  private templateEnvVar(kind: string): string {
+    return `GITHUB_TEMPLATE_${kind.toUpperCase()}`
   }
 
   /** Idempotent: returns existing repo if one with the same name already exists. */
@@ -37,6 +51,12 @@ export class GitHubProvisioner {
     } catch {
       // not found — create
     }
+    // Preflight the template repo. GitHub answers 404 (not 403) for a repo the
+    // token cannot see, so a bare "Not Found" from createUsingTemplate is
+    // ambiguous between "wrong name", "not a template", and "token lacks
+    // access". Check first and fail with something actionable.
+    await this.assertUsableTemplate(org, template, kind)
+
     const res = await this.client.repos.createUsingTemplate({
       template_owner: org,
       template_repo: template,
@@ -49,6 +69,38 @@ export class GitHubProvisioner {
     // Wait until package.json exists so downstream Vercel deploys don't clone an empty repo.
     await this.waitForFile(org, name, 'package.json')
     return { owner: org, repo: name, repoId: res.data.id, defaultBranch: res.data.default_branch ?? 'main' }
+  }
+
+  /**
+   * Verifies the configured template repo exists, is visible to this token, and
+   * is actually flagged as a template — throwing a message that names the repo
+   * and the env var to fix. Without this, every failure mode collapses into an
+   * unactionable "HttpError: Not Found".
+   */
+  private async assertUsableTemplate(org: string, template: string, kind: string): Promise<void> {
+    if (!this.client) return
+    const envVar = this.templateEnvVar(kind)
+    let repo
+    try {
+      repo = await this.client.repos.get({ owner: org, repo: template })
+    } catch (e) {
+      const status = (e as { status?: number }).status
+      if (status === 404) {
+        throw new Error(
+          `Template repo ${org}/${template} not found (or not visible to GITHUB_TOKEN). ` +
+          `Set ${envVar} to the correct repo name, or grant the token access to it. ` +
+          `Note: these template repos are private, and GitHub reports inaccessible repos as 404.`,
+        )
+      }
+      throw e
+    }
+    if (!repo.data.is_template) {
+      throw new Error(
+        `Repo ${org}/${template} exists but is not marked as a template repository. ` +
+        `Enable Settings -> "Template repository" on it, or point ${envVar} at the right repo.`,
+      )
+    }
+    this.logger.log(`Using template ${org}/${template} for archetype "${kind}"`)
   }
 
   /** Polls getContent until the path exists on the default branch, or timeout. */
