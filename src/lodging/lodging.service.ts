@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { InjectRepository } from '@mikro-orm/nestjs'
 import { EntityManager, EntityRepository } from '@mikro-orm/postgresql'
 import { Reservation } from '../entities/reservation.entity'
+import { SiteContent } from '../entities/site-content.entity'
 import { LodgingConfig, LodgingRoom, Site } from '../entities/site.entity'
 import { Owner } from '../entities/owner.entity'
 import { EmailService } from '../common/email.service'
@@ -28,9 +29,48 @@ export class LodgingService {
   constructor(
     @InjectRepository(Reservation) private readonly reservations: EntityRepository<Reservation>,
     @InjectRepository(Site) private readonly sites: EntityRepository<Site>,
+    @InjectRepository(SiteContent) private readonly contents: EntityRepository<SiteContent>,
     private readonly em: EntityManager,
     private readonly email: EmailService,
   ) {}
+
+  /**
+   * The site's bookable rooms.
+   *
+   * `lodgingConfig.rooms` is the source of truth once an owner has tuned rates
+   * and capacity in the dashboard — but it is only populated when they open the
+   * Lodging page, which runs a client-side sync. A hotel that enabled booking
+   * and filled in its Rooms content but never opened that page had an empty
+   * list here, so EVERY availability search returned "no rooms". Fall back to
+   * the published Rooms content so booking works the moment the add-on is on.
+   *
+   * Ids/capacity match what the dashboard sync would produce, so a later visit
+   * to the Lodging page reconciles instead of duplicating.
+   */
+  private async resolveRooms(site: Site, config: Required<LodgingConfig>): Promise<LodgingRoom[]> {
+    if (config.rooms.length) return config.rooms
+    const row = await this.contents.findOne(
+      { site: site.id, published: true },
+      { orderBy: { version: 'desc' } },
+    )
+    const list = (row?.payload as { rooms?: Array<{ name?: string; blurb?: string; rateFrom?: string; image?: string }> } | undefined)?.rooms
+    if (!list?.length) return []
+    const slugify = (s: string) =>
+      s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
+    return list.flatMap((r, i) => {
+      const label = (r.name ?? '').trim()
+      if (!label) return []
+      const rate = Math.round((parseFloat(String(r.rateFrom ?? '').replace(/[^0-9.]/g, '')) || 0) * 100)
+      return [{
+        id: slugify(label) || `room-${i + 1}`,
+        label,
+        description: r.blurb?.trim() || undefined,
+        capacity: 2,
+        nightlyRateCents: rate > 0 ? rate : undefined,
+        imageUrl: r.image?.trim() || undefined,
+      }]
+    })
+  }
 
   /** Public — returns rooms with availability info for the given window. */
   async listAvailability(siteSlug: string, checkIn: string, checkOut: string, partySize: number) {
@@ -46,7 +86,8 @@ export class LodgingService {
     if (nights > config.maxNights) throw new BadRequestException(`Maximum stay is ${config.maxNights} night(s)`)
 
     // Filter rooms by capacity first.
-    const candidate = config.rooms.filter(r => r.capacity >= partySize)
+    const allRooms = await this.resolveRooms(site, config)
+    const candidate = allRooms.filter(r => r.capacity >= partySize)
     if (!candidate.length) {
       return {
         checkIn, checkOut, nights,
@@ -102,7 +143,10 @@ export class LodgingService {
     if (nights < config.minNights || nights > config.maxNights) {
       throw new BadRequestException(`Stay must be between ${config.minNights} and ${config.maxNights} nights`)
     }
-    const room = findRoom(config, dto.roomId)
+    // Match availability: rooms may come from published content when the owner
+    // hasn't tuned a config yet, so validate against the same resolved list.
+    const rooms = await this.resolveRooms(site, config)
+    const room = findRoom({ ...config, rooms }, dto.roomId)
     if (!room) throw new BadRequestException('Unknown room')
     if (dto.partySize < 1 || dto.partySize > room.capacity) {
       throw new BadRequestException(`Party size must be 1-${room.capacity} for this room`)
