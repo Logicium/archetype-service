@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Octokit } from '@octokit/rest'
+import { createAppAuth } from '@octokit/auth-app'
 
 /** Creates a per-customer repo from the matching `archetype-{kind}-template-ui` template
  *  and writes the runtime env file so the deployed site fetches its overlay. */
@@ -8,10 +9,42 @@ export class GitHubProvisioner {
   private readonly logger = new Logger(GitHubProvisioner.name)
   private readonly client: Octokit | null
 
+  /**
+   * Two ways to authenticate, preferred first:
+   *
+   * 1. GitHub App (GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY + GITHUB_APP_INSTALLATION_ID).
+   *    Octokit mints a short-lived installation token and refreshes it
+   *    automatically before each call, so credentials never expire out from
+   *    under provisioning. The App's private key does not expire.
+   * 2. Personal access token (GITHUB_TOKEN). Simple, but every PAT expires —
+   *    fine-grained ones within a year at most — and when it does, every
+   *    purchase fails with "Bad credentials" until someone rotates it by hand.
+   */
   constructor() {
+    const appId = process.env.GITHUB_APP_ID
+    const privateKey = process.env.GITHUB_APP_PRIVATE_KEY
+    const installationId = process.env.GITHUB_APP_INSTALLATION_ID
     const token = process.env.GITHUB_TOKEN
-    this.client = token ? new Octokit({ auth: token }) : null
-    if (!token) this.logger.warn('GITHUB_TOKEN not set — GitHub provisioning will be skipped')
+
+    if (appId && privateKey && installationId) {
+      this.client = new Octokit({
+        authStrategy: createAppAuth,
+        auth: {
+          appId,
+          // Env vars usually carry the PEM with escaped newlines; PEM parsing
+          // needs the real thing.
+          privateKey: privateKey.replace(/\\n/g, '\n'),
+          installationId,
+        },
+      })
+      this.logger.log(`GitHub auth: App installation ${installationId} (tokens auto-refresh)`)
+    } else if (token) {
+      this.client = new Octokit({ auth: token })
+      this.logger.log('GitHub auth: personal access token (expires — set GITHUB_APP_* to auto-refresh)')
+    } else {
+      this.client = null
+      this.logger.warn('No GitHub credentials set — GitHub provisioning will be skipped')
+    }
   }
 
   /**
@@ -85,6 +118,15 @@ export class GitHubProvisioner {
       repo = await this.client.repos.get({ owner: org, repo: template })
     } catch (e) {
       const status = (e as { status?: number }).status
+      if (status === 401) {
+        throw new Error(
+          'GitHub rejected our credentials (401 Bad credentials). The token has expired, ' +
+          'been revoked, or was rotated. Issue a new GITHUB_TOKEN and update it in the ' +
+          'service environment — or, to stop this recurring, configure a GitHub App ' +
+          '(GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY + GITHUB_APP_INSTALLATION_ID), whose ' +
+          'installation tokens refresh automatically.',
+        )
+      }
       if (status === 404) {
         throw new Error(
           `Template repo ${org}/${template} not found (or not visible to GITHUB_TOKEN). ` +
