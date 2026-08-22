@@ -43,7 +43,13 @@ export interface PosAdapter {
     site: Site
     config: Required<PosConfig>
     print: boolean
-  }): Promise<{ posOrderId: string }>
+  }): Promise<{
+    posOrderId: string
+    /** False when the order reached the POS but the ticket did not print. */
+    printed: boolean
+    /** Why printing failed, when it did. */
+    printError?: string
+  }>
 }
 
 /** Thrown when a vendor rejects our credentials, so the caller can mark the

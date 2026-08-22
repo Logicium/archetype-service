@@ -147,7 +147,7 @@ export class CloverAdapter implements PosAdapter {
     site: Site
     config: Required<PosConfig>
     print: boolean
-  }): Promise<{ posOrderId: string }> {
+  }): Promise<{ posOrderId: string; printed: boolean; printError?: string }> {
     const { accessToken, merchantId, order, config, print } = args
     const base = `${this.apiBase}/v3/merchants/${encodeURIComponent(merchantId)}`
     const headers = {
@@ -202,20 +202,25 @@ export class CloverAdapter implements PosAdapter {
     }
 
     // 3. The call that actually prints the ticket.
+    let printed = false
+    let printError: string | undefined
     if (print) {
       try {
         await call(`${base}/print_event`, {
           method: 'POST',
           body: JSON.stringify({ orderRef: { id: posOrderId } }),
         })
+        printed = true
       } catch (e) {
         // The order is in the POS either way — a printer problem must not
-        // discard it, so this is logged rather than thrown.
-        this.logger.warn(`Clover print event failed for order ${order.id}: ${(e as Error).message}`)
+        // discard it. Report it so the dashboard can say "sent, but no ticket"
+        // rather than claiming it printed.
+        printError = (e as Error).message
+        this.logger.warn(`Clover print event failed for order ${order.id}: ${printError}`)
       }
     }
 
-    return { posOrderId }
+    return { posOrderId, printed, printError }
   }
 
   /** Customer context belongs on the ticket header, not in a line item. */

@@ -85,8 +85,9 @@ async function main() {
   }
   const cfg = { autoSend: true, autoPrint: true, titlePrefix: 'ONLINE' }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { posOrderId } = await clover.pushOrder({ accessToken: 'AT-1', merchantId: 'MERCH1', order: order as any, site: {} as any, config: cfg, print: true })
+  const { posOrderId, printed: printedOk } = await clover.pushOrder({ accessToken: 'AT-1', merchantId: 'MERCH1', order: order as any, site: {} as any, config: cfg, print: true })
   check('pushOrder returns the POS order id', posOrderId === 'ORD-9')
+  check('successful print is reported as printed: true', printedOk === true)
 
   const orderCall = calls.find(c => c.url === '/v3/merchants/MERCH1/orders')
   const title = String(orderCall?.body?.title ?? '')
@@ -117,6 +118,7 @@ async function main() {
   try {
     const r = await clover.pushOrder({ accessToken: 'AT-1', merchantId: 'MERCH1', order: order as any, site: {} as any, config: cfg, print: true })
     check('a printer failure does NOT lose the order (still returns its id)', r.posOrderId === 'ORD-9')
+    check('a printer failure is REPORTED, not silently swallowed', r.printed === false && !!r.printError, JSON.stringify({ printed: r.printed, printError: r.printError?.slice(0, 60) }))
   } catch {
     printerDownThrew = true
   } finally {

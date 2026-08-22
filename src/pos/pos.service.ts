@@ -140,7 +140,7 @@ export class PosService {
     try {
       const accessToken = await this.freshAccessToken(site)
       const adapter = this.adapterFor(site.posProvider)
-      const { posOrderId } = await adapter.pushOrder({
+      const { posOrderId, printed, printError } = await adapter.pushOrder({
         accessToken,
         merchantId: site.posMerchantId ?? '',
         order,
@@ -150,9 +150,17 @@ export class PosService {
       })
       order.posOrderId = posOrderId
       order.posSyncedAt = new Date()
-      order.posSyncError = undefined
+      // The order IS in the POS, so this is not a sync failure — but if the
+      // ticket did not print, the owner needs to know rather than see a
+      // confident "Printed" badge while the kitchen has no paper.
+      order.posSyncError = printError
+        ? `Order reached ${site.posProvider}, but the kitchen ticket did not print: ${printError}`.slice(0, 1000)
+        : undefined
       await this.em.persistAndFlush(order)
-      this.logger.log(`Order ${order.id.slice(0, 8)} -> ${site.posProvider} order ${posOrderId}`)
+      this.logger.log(
+        `Order ${order.id.slice(0, 8)} -> ${site.posProvider} order ${posOrderId}` +
+        (cfg.autoPrint ? (printed ? ' (ticket printed)' : ' (TICKET DID NOT PRINT)') : ' (printing off)'),
+      )
       return { ok: true }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)

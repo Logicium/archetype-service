@@ -83,11 +83,28 @@ export class PosOAuthController {
         .send(`<html><body style="font-family:sans-serif"><h2>POS connection failed</h2><p>${msg}</p><p>You can close this tab and try again from your dashboard.</p></body></html>`)
     }
 
-    // Clover can launch an installed app straight from the merchant's own
-    // dashboard. That arrives here with `code` + `merchant_id` but no `state`,
-    // so there is no way to know WHICH Apotome site is being connected — the
-    // signed state is the only thing that carries it. Say so plainly rather
-    // than showing a generic "invalid link".
+    // Log exactly what the vendor sent (no secrets are ever in these params) —
+    // OAuth dead-ends are otherwise invisible from the server side.
+    this.logger.log(`POS callback params: ${Object.keys(query).sort().join(', ') || '(none)'}`)
+
+    // Clover's POST-INSTALL redirect. When the app is not yet installed on the
+    // merchant, /oauth/v2/authorize walks them through installation and then
+    // bounces to the Site URL with merchant_id + client_id and NO code and NO
+    // state — the install flow does not carry our state through. There is
+    // nothing to exchange and no way to tell which site this is for, so the
+    // only fix is: install first, then authorise.
+    if (!code && query.merchant_id) {
+      this.logger.warn(`POS callback was an install redirect (merchant ${query.merchant_id}) — no code issued`)
+      return fail(
+        'Clover installed the app but did not finish the connection. This happens when the app was not yet ' +
+        'installed on that merchant. Open the merchant’s Clover dashboard, confirm "Apotome Kitchen" is ' +
+        'installed, then come back and click Connect Clover again.',
+      )
+    }
+
+    // Clover can also launch an already-installed app straight from the
+    // merchant's dashboard: that arrives with a code but no state, so we still
+    // cannot tell WHICH Apotome site is being connected.
     if (!state && code) {
       return fail(
         'Start the connection from your Apotome dashboard (Ordering → Kitchen printing → Connect Clover), ' +
