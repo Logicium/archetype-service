@@ -132,10 +132,20 @@ export class CloverAdapter implements PosAdapter {
       const res = await fetch(`${this.apiBase}/v3/merchants/${encodeURIComponent(t.merchantId)}`, {
         headers: { Authorization: `Bearer ${t.accessToken}`, Accept: 'application/json' },
       })
-      if (!res.ok) return undefined
+      if (!res.ok) {
+        // Non-fatal for connecting, but a brand-new token that cannot read the
+        // merchant is the first sign the app is missing permissions — which
+        // will resurface later as a 401 when pushing an order.
+        this.logger.warn(
+          `Clover merchant lookup failed (${res.status}): ${(await res.text()).slice(0, 200)}. ` +
+          'The app may be missing "Merchant: read" permission.',
+        )
+        return undefined
+      }
       const j = (await res.json()) as { name?: string }
       return j.name
-    } catch {
+    } catch (e) {
+      this.logger.warn(`Clover merchant lookup errored: ${(e as Error).message}`)
       return undefined
     }
   }
@@ -160,7 +170,16 @@ export class CloverAdapter implements PosAdapter {
       const res = await fetch(url, { ...init, headers })
       const text = await res.text()
       if (res.status === 401 || res.status === 403) {
-        throw new PosAuthError(`Clover rejected our credentials (${res.status}). The connection needs re-authorising.`)
+        // Clover answers 401 both for a dead token AND for a live token whose
+        // app lacks the permission for this endpoint. The body distinguishes
+        // them, so never swallow it.
+        const where = url.replace(this.apiBase, '')
+        throw new PosAuthError(
+          `Clover rejected ${init.method} ${where} (${res.status}): ${text.slice(0, 300) || '(empty body)'}. ` +
+          'Either the connection needs re-authorising, or the Clover app is missing the ' +
+          'permission for this endpoint (Orders read+write, Merchant read). Changing app ' +
+          'permissions requires disconnecting and reconnecting to mint a new token.',
+        )
       }
       if (!res.ok) {
         const where = url.replace(this.apiBase, '')
