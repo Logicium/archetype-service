@@ -35,6 +35,18 @@ async function bootstrap() {
     ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "bank_mask" varchar(255) NULL;
     ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "stripe_session_id" varchar(255) NULL;
     ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "stripe_payment_intent_id" varchar(255) NULL;
+    ALTER TABLE "${schema}"."site" ADD COLUMN IF NOT EXISTS "pos_provider" varchar(32) NULL;
+    ALTER TABLE "${schema}"."site" ADD COLUMN IF NOT EXISTS "pos_merchant_id" varchar(255) NULL;
+    ALTER TABLE "${schema}"."site" ADD COLUMN IF NOT EXISTS "pos_merchant_name" varchar(255) NULL;
+    ALTER TABLE "${schema}"."site" ADD COLUMN IF NOT EXISTS "pos_access_token" text NULL;
+    ALTER TABLE "${schema}"."site" ADD COLUMN IF NOT EXISTS "pos_refresh_token" text NULL;
+    ALTER TABLE "${schema}"."site" ADD COLUMN IF NOT EXISTS "pos_access_token_expires_at" timestamptz NULL;
+    ALTER TABLE "${schema}"."site" ADD COLUMN IF NOT EXISTS "pos_refresh_token_expires_at" timestamptz NULL;
+    ALTER TABLE "${schema}"."site" ADD COLUMN IF NOT EXISTS "pos_connected_at" timestamptz NULL;
+    ALTER TABLE "${schema}"."site" ADD COLUMN IF NOT EXISTS "pos_config" jsonb NULL;
+    ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "pos_order_id" varchar(255) NULL;
+    ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "pos_synced_at" timestamptz NULL;
+    ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "pos_sync_error" text NULL;
     CREATE TABLE IF NOT EXISTS "${schema}"."page_hit" (
       "id" uuid NOT NULL PRIMARY KEY,
       "site_id" uuid NOT NULL,

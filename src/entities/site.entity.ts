@@ -102,6 +102,19 @@ export interface OrderingConfig {
   notifyEmail?: string
 }
 
+/** POS vendors. Clover ships first; the others are accepted by the schema so
+ *  adding an adapter never needs a migration. */
+export type PosProvider = 'clover' | 'square' | 'toast'
+
+export interface PosConfig {
+  /** Push each new online order to the POS automatically. Default true. */
+  autoSend?: boolean
+  /** Fire a print event so the kitchen ticket prints on order arrival. Default true. */
+  autoPrint?: boolean
+  /** Prefix on the POS order title, e.g. "ONLINE — Jane D.". Default 'ONLINE'. */
+  titlePrefix?: string
+}
+
 @Entity()
 export class Site {
   [OptionalProps]?: 'createdAt' | 'updatedAt' | 'plan' | 'status' | 'addOns' | 'autoUpdate'
@@ -205,6 +218,48 @@ export class Site {
   /** Per-site meal-ordering configuration (Mesa Meal Ordering add-on). */
   @Property({ type: 'json', nullable: true })
   orderingConfig?: OrderingConfig
+
+  /* ── Point of sale (Mesa ordering → kitchen ticket printing) ──
+     One connection per site. `posProvider` selects the adapter; the token
+     fields are provider-agnostic so Square/Toast slot in without a schema
+     change. Tokens are stored as issued — treat this row as secret material.
+     TODO: encrypt at rest alongside instagramToken. */
+
+  /** Connected POS vendor, or undefined when no POS is linked.
+   *  Stored as a plain varchar (not an enum) so adding Square/Toast needs no
+   *  migration — MikroORM would otherwise try to use the TS union's name as a
+   *  Postgres type. */
+  @Property({ type: 'string', length: 32, nullable: true })
+  posProvider?: PosProvider
+
+  /** Vendor's merchant identifier (Clover merchantId, Square location, …). */
+  @Property({ nullable: true })
+  posMerchantId?: string
+
+  /** Human-readable merchant name, shown in the dashboard. */
+  @Property({ nullable: true })
+  posMerchantName?: string
+
+  @Property({ type: 'text', nullable: true })
+  posAccessToken?: string
+
+  @Property({ type: 'text', nullable: true })
+  posRefreshToken?: string
+
+  /** When the access token expires; refreshed ahead of this by PosService. */
+  @Property({ nullable: true })
+  posAccessTokenExpiresAt?: Date
+
+  /** When the refresh token itself dies — past this the owner must reconnect. */
+  @Property({ nullable: true })
+  posRefreshTokenExpiresAt?: Date
+
+  @Property({ nullable: true })
+  posConnectedAt?: Date
+
+  /** Per-site POS behaviour (auto-send, printing). Defaults in `pos/pos-config.ts`. */
+  @Property({ type: 'json', nullable: true })
+  posConfig?: PosConfig
 
   /** Enabled premium add-ons (e.g. 'appointments', 'eshop', 'lodging', 'ordering', 'ticketing').
    *  Driven by the order's `addOns` at provisioning time; mutable by admin. */

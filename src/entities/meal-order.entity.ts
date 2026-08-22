@@ -54,6 +54,20 @@ export class MealOrder {
   @Enum({ items: () => ['pending', 'confirmed', 'ready', 'completed', 'cancelled'] as MealOrderStatus[] })
   status: MealOrderStatus = 'pending'
 
+  /* ── POS sync (kitchen ticket) ──
+     posOrderId is set once the order exists in the POS; posSyncError holds the
+     last failure so the dashboard can show it and offer a resend. A failed push
+     never blocks the customer's order — it is retried on demand. */
+
+  @Property({ nullable: true })
+  posOrderId?: string
+
+  @Property({ nullable: true })
+  posSyncedAt?: Date
+
+  @Property({ type: 'text', nullable: true })
+  posSyncError?: string
+
   @Property({ defaultRaw: 'NOW()' })
   createdAt: Date = new Date()
 

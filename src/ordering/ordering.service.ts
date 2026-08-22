@@ -6,6 +6,7 @@ import { MealOrder, MealOrderLine } from '../entities/meal-order.entity'
 import { OrderingConfig, Site } from '../entities/site.entity'
 import { Owner } from '../entities/owner.entity'
 import { EmailService } from '../common/email.service'
+import { PosService } from '../pos/pos.service'
 import { generateOrderingSlots, resolveOrderingConfig, snapToSlot } from './ordering-config'
 
 export interface CreateMealOrderDto {
@@ -40,6 +41,7 @@ export class OrderingService {
     @InjectRepository(Site) private readonly sites: EntityRepository<Site>,
     private readonly em: EntityManager,
     private readonly email: EmailService,
+    private readonly pos: PosService,
   ) {}
 
   // ----- Public -----
@@ -151,6 +153,11 @@ export class OrderingService {
     await this.sendOrderEmails(order, site, config).catch(e =>
       this.logger.error(`Meal order email failed: ${(e as Error).message}`),
     )
+
+    // Print the kitchen ticket. pushOrder never throws and records its own
+    // failure on the order, so a POS outage cannot fail the customer's
+    // checkout — the dashboard shows the error and offers a resend.
+    await this.pos.pushOrder(order, site)
 
     return this.publicOrder(order)
   }
@@ -298,6 +305,10 @@ export class OrderingService {
       currency: o.currency,
       status: o.status,
       createdAt: o.createdAt.toISOString(),
+      // POS sync state — drives the dashboard's ticket badge + resend button.
+      posOrderId: o.posOrderId ?? null,
+      posSyncedAt: o.posSyncedAt ? o.posSyncedAt.toISOString() : null,
+      posSyncError: o.posSyncError ?? null,
     }
   }
 
