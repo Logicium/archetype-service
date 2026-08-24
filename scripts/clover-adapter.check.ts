@@ -126,6 +126,25 @@ async function main() {
   }
   check('printer failure never throws out of pushOrder', !printerDownThrew)
 
+  // 5b. Clover's terse printing errors must reach the owner as instructions.
+  calls.length = 0
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('/print_event')) {
+      return new Response('{"message":"The default printing device is missing"}', { status: 400 })
+    }
+    return origFetch(input, init)
+  }) as typeof fetch
+  let noDefaultPrinter = ''
+  try {
+    const r = await clover.pushOrder({ accessToken: 'AT-1', merchantId: 'MERCH1', order: order as any, site: {} as any, config: cfg, print: true })
+    noDefaultPrinter = r.printError ?? ''
+  } finally {
+    globalThis.fetch = origFetch
+  }
+  check('"default printing device is missing" becomes an owner-readable fix',
+    /Printers app/.test(noDefaultPrinter) && !/print_event/.test(noDefaultPrinter),
+    noDefaultPrinter.slice(0, 80))
+
   // 6. Expired credentials must be distinguishable from a transient failure.
   globalThis.fetch = (async () => new Response('unauthorized', { status: 401 })) as typeof fetch
   let authErrName = ''

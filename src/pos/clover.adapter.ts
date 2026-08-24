@@ -234,12 +234,42 @@ export class CloverAdapter implements PosAdapter {
         // The order is in the POS either way — a printer problem must not
         // discard it. Report it so the dashboard can say "sent, but no ticket"
         // rather than claiming it printed.
-        printError = (e as Error).message
+        printError = this.explainPrintFailure((e as Error).message)
         this.logger.warn(`Clover print event failed for order ${order.id}: ${printError}`)
       }
     }
 
     return { posOrderId, printed, printError }
+  }
+
+  /**
+   * Clover reports printing problems as terse server messages that mean nothing
+   * to a restaurant owner. Translate the ones we have actually hit into the
+   * action that fixes them; anything unrecognised passes through untouched so
+   * we never hide a new failure behind a guess.
+   *
+   * "The default printing device is missing" is by far the common one. Clover
+   * routes a print event to a printer owned by a registered Clover terminal —
+   * a Station, Mini, Flex or Duo. A merchant with no terminal paired (or one
+   * with no default order printer chosen on it) gets this even though the
+   * order itself lands in Clover perfectly.
+   */
+  private explainPrintFailure(raw: string): string {
+    if (/default printing device is missing/i.test(raw)) {
+      return (
+        'Clover has no default printer set for this merchant. On your Clover ' +
+        'terminal open the Printers app, add or select your kitchen printer, ' +
+        'and set it as the printer for online orders. Orders will keep arriving ' +
+        'in Clover in the meantime — you can reprint them from there.'
+      )
+    }
+    if (/printer.*(offline|not responding|unreachable)/i.test(raw)) {
+      return (
+        'Clover could not reach your kitchen printer — it looks powered off or ' +
+        'off the network. Check the printer, then use Print again.'
+      )
+    }
+    return raw
   }
 
   /** Customer context belongs on the ticket header, not in a line item. */

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { put, del } from '@vercel/blob'
 import { Site } from '../entities/site.entity'
+import { RenderService } from '../render/render.service'
 
 /**
  * Captures a screenshot of a site's production URL using Puppeteer, uploads it
@@ -27,7 +28,7 @@ export class ScreenshotService {
   /** Concurrent capture deduplication keyed by siteId. */
   private readonly inflight = new Map<string, Promise<void>>()
 
-  constructor() {
+  constructor(private readonly render: RenderService) {
     this.useServerlessChromium = process.env.SCREENSHOT_USE_SERVERLESS_CHROMIUM === 'true'
     this.logger.log(`Screenshot capture: chromium=${this.useServerlessChromium ? 'serverless (@sparticuz/chromium)' : 'bundled (puppeteer)'}`)
   }
@@ -97,66 +98,11 @@ export class ScreenshotService {
     site.screenshotSourceUrl = url
   }
 
-  private async launchBrowser() {
-    // Flags that matter most for memory on a 512 MB container:
-    //  --single-process   : renderer runs inside the browser process (no child spawns)
-    //  --no-zygote        : disables the zygote launcher process (required with single-process)
-    //  --disable-dev-shm-usage : use /tmp instead of /dev/shm (avoids OOM on small /dev/shm)
-    //  --js-flags         : cap V8 old-space so GC runs before Linux OOM-kills the process
-    const MEMORY_FLAGS = [
-      '--single-process',
-      '--no-zygote',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-accelerated-2d-canvas',
-      '--disable-background-networking',
-      '--disable-default-apps',
-      '--disable-extensions',
-      '--disable-sync',
-      '--disable-translate',
-      '--hide-scrollbars',
-      '--disable-web-security',
-      '--js-flags=--max-old-space-size=192',
-    ]
-    if (this.useServerlessChromium) {
-      const [chromiumMod, puppeteer] = await Promise.all([
-        import('@sparticuz/chromium'),
-        import('puppeteer-core'),
-      ])
-      const chromium = (chromiumMod.default ?? chromiumMod) as typeof chromiumMod.default
-      chromium.setGraphicsMode = false
-      const executablePath = await chromium.executablePath()
-      const args = [...new Set([...chromium.args, ...MEMORY_FLAGS])]
-      return puppeteer.launch({ args, executablePath, headless: true })
-    }
-    const puppeteer = await import('puppeteer')
-    return puppeteer.launch({ headless: true, args: MEMORY_FLAGS })
-  }
-
-  private async capturePng(url: string, width: number, height: number): Promise<Buffer> {
-    this.logger.log(`Capturing screenshot: ${url}`)
-    let browser: Awaited<ReturnType<typeof this.launchBrowser>>
-    try {
-      browser = await this.launchBrowser()
-    } catch (e) {
-      throw new Error(`Failed to launch browser (${this.useServerlessChromium ? 'serverless' : 'bundled'}): ${(e as Error).message}`)
-    }
-    try {
-      const page = await browser.newPage()
-      await page.setViewport({ width, height })
-      await page.setRequestInterception(true)
-      page.on('request', (req) => {
-        const type = req.resourceType()
-        if (['media', 'font', 'websocket', 'eventsource', 'manifest'].includes(type)) req.abort()
-        else req.continue()
-      })
-      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30_000 })
-      await new Promise(r => setTimeout(r, 800))
-      return await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width, height } }) as Buffer
-    } finally {
-      await browser.close()
-    }
+  /**
+   * Delegates to RenderService so there is one Chromium launcher in this
+   * process, not two sets of memory flags drifting apart.
+   */
+  private capturePng(url: string, width: number, height: number): Promise<Buffer> {
+    return this.render.capturePng({ url, width, height, settleMs: 800 })
   }
 }

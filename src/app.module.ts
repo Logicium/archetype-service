@@ -5,6 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule'
 import { ThrottlerModule } from '@nestjs/throttler'
 import { BullModule } from '@nestjs/bullmq'
 import { CommonModule } from './common/common.module'
+import { RenderModule } from './render/render.module'
 import { AuthModule } from './auth/auth.module'
 import { SitesModule } from './sites/sites.module'
 import { FormsModule } from './forms/forms.module'
@@ -42,6 +43,7 @@ const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
       } as never,
     }),
     CommonModule,
+    RenderModule,
     AuthModule,
     SitesModule,
     FormsModule,
