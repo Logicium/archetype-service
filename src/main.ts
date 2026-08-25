@@ -68,8 +68,10 @@ async function bootstrap() {
   app.useBodyParser('json', { limit: '25mb' })
   app.useBodyParser('urlencoded', { limit: '25mb', extended: true })
 
-  // Dynamic CORS: always-allow envvar + every live custom domain / vercel URL.
+  // Dynamic CORS: always-allow envvar + every custom domain / vercel URL in
+  // the sites table. Primed at boot so the first request does not pay for it.
   const sites = app.get(SitesService)
+  await sites.refreshOrigins()
   const allowList = (process.env.CORS_ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean)
   app.enableCors({
     credentials: true,
@@ -81,9 +83,12 @@ async function bootstrap() {
       // Always allow any Vercel preview/production URL regardless of DB state
       if (origin.endsWith('.vercel.app')) return cb(null, true)
       try {
-        const dyn = await sites.allLiveOrigins()
-        if (dyn.includes(origin)) return cb(null, true)
-      } catch { /* ignore */ }
+        if (await sites.isSiteOrigin(origin.toLowerCase())) return cb(null, true)
+      } catch (e) {
+        // Never silently: a failure here blocks a real customer's domain, and
+        // the old bare `catch {}` hid exactly that for every custom domain.
+        console.error(`CORS origin lookup failed for ${origin}:`, e)
+      }
       cb(new Error(`Origin not allowed: ${origin}`), false)
     },
   })

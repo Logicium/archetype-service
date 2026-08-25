@@ -44,6 +44,9 @@ export class DomainsController {
     if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) throw new BadRequestException('Invalid domain')
     site.customDomain = domain
     await this.em.persistAndFlush(site)
+    // The owner will try to sign in on this domain as soon as DNS resolves,
+    // so let CORS pick it up now rather than after the cache TTL.
+    this.sites.invalidateOrigins()
     return { domain, dns: dnsInstructions(domain) }
   }
 

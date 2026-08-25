@@ -195,14 +195,93 @@ export class SitesService {
     return candidate
   }
 
-  /** Returns the list of distinct custom domains for dynamic CORS. */
-  async allLiveOrigins(): Promise<string[]> {
-    const live = await this.sites.find({ status: 'live' })
-    const origins: string[] = []
-    for (const s of live) {
-      if (s.vercelProductionUrl) origins.push(`https://${s.vercelProductionUrl.replace(/^https?:\/\//, '')}`)
-      if (s.customDomain) origins.push(`https://${s.customDomain}`, `https://www.${s.customDomain}`)
+  /*
+   * Dynamic CORS origins.
+   *
+   * A site's address already lives in the database, so that is the list of
+   * record: the moment an owner saves a custom domain, their site can call
+   * this API with no env edit and no redeploy.
+   *
+   * Two details this has to get right, both of which bit us before:
+   *
+   * 1. The lookup runs from the CORS callback, which is outside any request
+   *    context. MikroORM refuses context-specific calls on the global
+   *    EntityManager, so every query has to go through a fork. It also has to
+   *    be a fresh fork per refresh — a long-lived EM keeps entities in its
+   *    identity map and would serve the domain-less copy of a site loaded
+   *    before the owner added their domain.
+   * 2. Any status counts except `archived`. Restricting to `live` locked
+   *    owners out of their own dashboard during provisioning and redeploys,
+   *    which is exactly when they are most likely to be poking at the site.
+   */
+  private originCache = new Set<string>()
+  private originsRefreshedAt = 0
+  private lastMissRefresh = 0
+  private static readonly ORIGIN_TTL_MS = 5 * 60_000
+  private static readonly MISS_THROTTLE_MS = 30_000
+
+  /** Reads every current site origin. Always a fresh fork — see above. */
+  private async readOrigins(): Promise<Set<string>> {
+    const rows = await this.em.fork().find(
+      Site,
+      { status: { $ne: 'archived' } },
+      { fields: ['customDomain', 'vercelProductionUrl'] },
+    )
+    const origins = new Set<string>()
+    const add = (host?: string) => {
+      if (!host) return
+      const clean = host.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+      if (clean) origins.add(`https://${clean}`)
+    }
+    for (const s of rows) {
+      add(s.vercelProductionUrl)
+      // Domains are stored apex-normalised, but Vercel serves both hosts and
+      // either one can end up in the address bar.
+      if (s.customDomain) {
+        add(s.customDomain)
+        add(`www.${s.customDomain}`)
+      }
     }
     return origins
+  }
+
+  /** Refreshes the cache, keeping the last good set if the database hiccups. */
+  async refreshOrigins(): Promise<void> {
+    try {
+      this.originCache = await this.readOrigins()
+    } catch {
+      /* keep serving the last known set rather than locking every site out */
+    }
+    this.originsRefreshedAt = Date.now()
+  }
+
+  /**
+   * Forces the next origin check to re-read. Called when a domain is saved so
+   * the owner does not have to wait out the TTL to sign in on it.
+   */
+  invalidateOrigins(): void {
+    this.originsRefreshedAt = 0
+    this.lastMissRefresh = 0
+  }
+
+  /**
+   * Whether `origin` belongs to one of our sites. A miss re-reads the table
+   * (throttled) so a domain saved seconds ago is accepted on the first try,
+   * without letting a stranger hammering preflights turn this into a
+   * database load test.
+   */
+  async isSiteOrigin(origin: string): Promise<boolean> {
+    const stale = Date.now() - this.originsRefreshedAt > SitesService.ORIGIN_TTL_MS
+    if (this.originCache.has(origin)) {
+      if (stale) void this.refreshOrigins()
+      return true
+    }
+    const now = Date.now()
+    if (stale || now - this.lastMissRefresh > SitesService.MISS_THROTTLE_MS) {
+      this.lastMissRefresh = now
+      await this.refreshOrigins()
+      return this.originCache.has(origin)
+    }
+    return false
   }
 }
