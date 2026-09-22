@@ -16,6 +16,7 @@ import { resolveDeployedContentApiUrl } from './content-api.util'
 import { normalizeWizardPayload } from './wizard-payload.util'
 import { getArchetypeDefaults } from './defaults'
 import { mergeContent } from './merge-content.util'
+import { resolvePlanTier } from '../shared/tokens'
 import { SiteCopyGenerator } from './site-copy.generator'
 
 @Processor(PROVISION_QUEUE)
@@ -74,6 +75,12 @@ export class ProvisioningProcessor extends WorkerHost {
     }
     const seededConfig = mergeContent<Record<string, unknown>>(defaults, aiCopy, wp.config ?? {})
 
+    // The tier the buyer actually paid for decides the layout. The wizard also
+    // carries a `variant`, but it is a preview control — letting it win would
+    // hand an Essentials layout to someone who bought Portfolio outright.
+    const tier = resolvePlanTier(order.plan)
+    seededConfig.variant = tier
+
     /** Helper: run a step, log success/failure, rethrow on failure. */
     const step = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
       const started = Date.now()
@@ -107,7 +114,9 @@ export class ProvisioningProcessor extends WorkerHost {
         owner: order.owner,
         slug: candidate,
         archetype: order.archetype,
-        plan: order.plan,
+        // Normalised to a tier name, never a catalogue SKU — every gate
+        // downstream asks "which tier?", not "which product?".
+        plan: tier,
         status: 'provisioning',
       })
       await em.persistAndFlush(created)

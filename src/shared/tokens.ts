@@ -42,3 +42,27 @@ export const VARIANT_PHOTO_COUNT: Record<SiteVariant, { gallery: number; max: nu
   essentials: { gallery: 6, max: 8 },
   portfolio: { gallery: 12, max: 16 },
 }
+
+/**
+ * The single place that decides which tier a site is on.
+ *
+ * `Site.plan` has held two different kinds of value over time: catalogue SKU
+ * ids from the initial purchase (`website-extended`) and tier names from the
+ * upgrade flow (`portfolio`). Both have to resolve the same way, or an owner
+ * who bought Portfolio outright gets the Essentials site they did not pay for.
+ * New rows are normalised to the tier name; this keeps older rows working
+ * without a backfill.
+ *
+ * Anything unrecognised is Essentials — the tier that grants nothing — so a
+ * typo can never hand out paid capacity.
+ */
+const PORTFOLIO_PLANS = new Set([
+  // tier names
+  'portfolio', 'extended', 'premium', 'pro',
+  // catalogue SKUs that include the Portfolio size
+  'website-extended', 'website-premium', 'website-portfolio-upgrade',
+])
+
+export function resolvePlanTier(plan: string | null | undefined): SiteVariant {
+  return PORTFOLIO_PLANS.has((plan ?? '').trim().toLowerCase()) ? 'portfolio' : 'essentials'
+}

@@ -5,6 +5,7 @@ import { InjectQueue } from '@nestjs/bullmq'
 import { Queue } from 'bullmq'
 import Stripe from 'stripe'
 import { findBundle, findPriceItem } from '../shared'
+import { resolvePlanTier } from '../shared/tokens'
 import { Order } from '../entities/order.entity'
 import { Owner } from '../entities/owner.entity'
 import { PROVISION_QUEUE, PROVISION_JOB } from '../provisioning/provisioning.constants'
@@ -224,11 +225,44 @@ export class OrdersService {
       return
     }
     const purchased = [order.plan, ...order.addOns]
-    if (purchased.includes('website-portfolio-upgrade') || purchased.includes('website-extended')) {
+    if (purchased.some(p => resolvePlanTier(p) === 'portfolio')) {
       site.plan = 'portfolio'
+      // Entitlement alone changes nothing the customer can see: the layout is
+      // driven by `variant` in the site's content. Flip it here so the site
+      // they just paid for is different the next time it loads, instead of
+      // waiting for them to find the variant control themselves.
+      await this.applyVariantToContent(site, 'portfolio')
       this.logger.log(`Site ${site.slug} upgraded to portfolio (order ${order.id})`)
     }
     await this.em.persistAndFlush(site)
+  }
+
+  /**
+   * Writes `variant` into a site's live content, and into an open draft too so
+   * an owner mid-edit does not publish the old variant straight back over it.
+   */
+  private async applyVariantToContent(site: { id: string; slug: string }, variant: string) {
+    const { SiteContent } = await import('../entities/site-content.entity')
+    const rows = await this.em.find(
+      SiteContent,
+      { site: site.id },
+      { orderBy: { version: 'desc' }, limit: 2 },
+    )
+    // The newest published row is what visitors see; a newer unpublished row
+    // is the owner's draft. Both need the new variant.
+    const targets = [
+      rows.find(r => r.published),
+      rows.find(r => !r.published),
+    ].filter((r): r is NonNullable<typeof r> => !!r)
+
+    if (!targets.length) {
+      this.logger.warn(`Site ${site.slug} has no content rows to apply variant '${variant}' to`)
+      return
+    }
+    for (const row of targets) {
+      row.payload = { ...(row.payload ?? {}), variant }
+    }
+    await this.em.persistAndFlush(targets)
   }
 
   /** After a successful purchase, email the owner a magic sign-in link so
