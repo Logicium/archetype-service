@@ -73,6 +73,13 @@ export class MealOrder {
   @Property({ nullable: true })
   stripePaymentIntentId?: string
 
+  /** Square order behind the payment link, when the owner checks out through Square. */
+  @Property({ nullable: true })
+  squareOrderId?: string
+
+  @Property({ nullable: true })
+  squarePaymentId?: string
+
   /* ── POS sync (kitchen ticket) ──
      posOrderId is set once the order exists in the POS; posSyncError holds the
      last failure so the dashboard can show it and offer a resend. A failed push

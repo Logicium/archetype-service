@@ -75,6 +75,13 @@ export class ShopOrder {
   @Property({ nullable: true })
   stripePaymentIntentId?: string
 
+  /** Square order behind the payment link, when the owner checks out through Square. */
+  @Property({ nullable: true })
+  squareOrderId?: string
+
+  @Property({ nullable: true })
+  squarePaymentId?: string
+
   @Property({ defaultRaw: 'NOW()' })
   createdAt: Date = new Date()
 

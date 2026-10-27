@@ -3,11 +3,11 @@ import { MikroOrmModule } from '@mikro-orm/nestjs'
 import { Owner } from '../entities/owner.entity'
 import { AuthModule } from '../auth/auth.module'
 import { PaymentsService } from './payments.service'
-import { PaymentsController } from './payments.controller'
+import { PaymentsController, SquareOAuthController } from './payments.controller'
 
 @Module({
   imports: [MikroOrmModule.forFeature([Owner]), AuthModule],
-  controllers: [PaymentsController],
+  controllers: [PaymentsController, SquareOAuthController],
   providers: [PaymentsService],
   exports: [PaymentsService],
 })

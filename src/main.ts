@@ -51,6 +51,18 @@ async function bootstrap() {
     ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "stripe_session_id" varchar(255) NULL;
     ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "stripe_payment_intent_id" varchar(255) NULL;
     ALTER TABLE "${schema}"."product" ADD COLUMN IF NOT EXISTS "category" varchar(160) NULL;
+    ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "payment_provider" varchar(16) NULL;
+    ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "square_merchant_id" varchar(255) NULL;
+    ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "square_merchant_name" varchar(255) NULL;
+    ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "square_location_id" varchar(255) NULL;
+    ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "square_access_token" text NULL;
+    ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "square_refresh_token" text NULL;
+    ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "square_access_token_expires_at" timestamptz NULL;
+    ALTER TABLE "${schema}"."owner" ADD COLUMN IF NOT EXISTS "square_connected_at" timestamptz NULL;
+    ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "square_order_id" varchar(255) NULL;
+    ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "square_payment_id" varchar(255) NULL;
+    ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "square_order_id" varchar(255) NULL;
+    ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "square_payment_id" varchar(255) NULL;
     CREATE TABLE IF NOT EXISTS "${schema}"."page_hit" (
       "id" uuid NOT NULL PRIMARY KEY,
       "site_id" uuid NOT NULL,

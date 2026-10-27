@@ -266,35 +266,37 @@ export class OrderingService {
     }
 
     order.paymentStatus = 'awaiting'
-    order.stripeSessionId = checkout.sessionId
+    if (checkout.provider === 'square') order.squareOrderId = checkout.squareOrderId
+    else order.stripeSessionId = checkout.stripeSessionId
     await this.em.persistAndFlush(order)
     return { orderId: order.id, checkoutUrl: checkout.url, order: this.publicOrder(order) }
   }
 
   /**
-   * Verify a checkout session with Stripe and mark the order paid. Reached
-   * from the storefront success redirect AND the Connect webhook; idempotent,
+   * Verify the hosted checkout (Stripe session or Square order) and mark the
+   * order paid. Reached from the storefront success redirect AND the provider
+   * webhook; idempotent,
    * so whichever lands first does the work and the other is a no-op.
    */
   async confirmCheckout(orderId: string) {
     const order = await this.orders.findOne({ id: orderId }, { populate: ['site', 'site.owner'] as never })
     if (!order) throw new NotFoundException('Order not found')
-    if (order.paymentStatus !== 'awaiting' || !order.stripeSessionId) return this.publicOrder(order)
-    const stripe = this.payments.stripeClient
-    if (!stripe) return this.publicOrder(order)
+    if (order.paymentStatus !== 'awaiting' || (!order.stripeSessionId && !order.squareOrderId)) return this.publicOrder(order)
 
-    const session = await stripe.checkout.sessions.retrieve(order.stripeSessionId)
-    if (session.payment_status === 'paid') {
-      const paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : undefined
+    const paid = await this.payments.checkPaid(order.site.owner, order)
+    if (paid.paid) {
+      const paymentPatch = paid.provider === 'square'
+        ? { squarePaymentId: paid.paymentRef }
+        : { stripePaymentIntentId: paid.paymentRef }
       // The webhook and the success redirect race each other; a conditional
       // UPDATE lets exactly one of them win and send the emails / ticket.
       const won = await this.em.nativeUpdate(
         MealOrder,
         { id: order.id, paymentStatus: 'awaiting' },
-        { paymentStatus: 'paid', stripePaymentIntentId: paymentIntentId },
+        { paymentStatus: 'paid', ...paymentPatch },
       )
       order.paymentStatus = 'paid'
-      order.stripePaymentIntentId = paymentIntentId
+      Object.assign(order, paymentPatch)
       if (won === 1) {
         const site = order.site
         await this.fulfilPlacedOrder(order, site, resolveOrderingConfig(site.orderingConfig))

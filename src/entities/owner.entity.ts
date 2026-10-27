@@ -1,6 +1,8 @@
 import { Entity, OptionalProps, PrimaryKey, Property, Unique } from '@mikro-orm/core'
 import { randomUUID } from 'crypto'
 
+export type PaymentProvider = 'stripe' | 'square'
+
 @Entity()
 export class Owner {
   [OptionalProps]?: 'createdAt' | 'name' | 'stripeChargesEnabled' | 'stripePayoutsEnabled' | 'stripeDetailsSubmitted'
@@ -30,7 +32,7 @@ export class Owner {
   @Property({ nullable: true })
   lastLoginAt?: Date
 
-  // ── Payments: Stripe Connect (Express) ──
+  // ── Payments: Stripe Connect ──
   // One connected account per owner routes payouts for EVERY site they own —
   // destination charges on any of their sites' orders settle here.
   @Property({ nullable: true })
@@ -45,6 +47,35 @@ export class Owner {
 
   @Property({ default: false })
   stripeDetailsSubmitted: boolean = false
+
+  // ── Payments: Square (OAuth on the owner's own Square account) ──
+  // Which provider storefront checkouts run through when both are connected.
+  // Unset means "whichever is connected, Stripe first" (see PaymentsService).
+  @Property({ length: 16, nullable: true })
+  paymentProvider?: PaymentProvider
+
+  @Property({ nullable: true })
+  squareMerchantId?: string
+
+  @Property({ nullable: true })
+  squareMerchantName?: string
+
+  /** Payment links are created at a location; the first active one on connect. */
+  @Property({ nullable: true })
+  squareLocationId?: string
+
+  /** 30-day OAuth access token; refreshed lazily and by the nightly sweep. */
+  @Property({ type: 'text', nullable: true })
+  squareAccessToken?: string
+
+  @Property({ type: 'text', nullable: true })
+  squareRefreshToken?: string
+
+  @Property({ nullable: true })
+  squareAccessTokenExpiresAt?: Date
+
+  @Property({ nullable: true })
+  squareConnectedAt?: Date
 
   // ── Payments: Plaid bank link (optional; funds a Connect external account) ──
   @Property({ nullable: true })

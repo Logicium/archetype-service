@@ -221,26 +221,27 @@ export class ShopService {
       return { orderId: order.id, checkoutUrl: null as string | null, order: this.publicOrder(order) }
     }
 
-    order.stripeSessionId = checkout.sessionId
+    if (checkout.provider === 'square') order.squareOrderId = checkout.squareOrderId
+    else order.stripeSessionId = checkout.stripeSessionId
     await this.em.persistAndFlush(order)
     return { orderId: order.id, checkoutUrl: checkout.url, order: this.publicOrder(order) }
   }
 
   /**
-   * Verify a checkout session with Stripe and flip the order to paid. Called
-   * from the storefront success redirect; idempotent and safe to re-run.
+   * Verify the hosted checkout (Stripe session or Square order) and flip the
+   * order to paid. Reached from the storefront success redirect and the
+   * provider webhook; idempotent and safe to re-run.
    */
   async confirmCheckout(orderId: string) {
     const order = await this.orders.findOne({ id: orderId }, { populate: ['site', 'site.owner'] as never })
     if (!order) throw new NotFoundException('Order not found')
-    if (order.status !== 'pending' || !order.stripeSessionId) return this.publicOrder(order)
-    const stripe = this.payments.stripeClient
-    if (!stripe) return this.publicOrder(order)
+    if (order.status !== 'pending' || (!order.stripeSessionId && !order.squareOrderId)) return this.publicOrder(order)
 
-    const session = await stripe.checkout.sessions.retrieve(order.stripeSessionId)
-    if (session.payment_status === 'paid') {
+    const paid = await this.payments.checkPaid(order.site.owner, order)
+    if (paid.paid) {
       order.status = 'paid'
-      order.stripePaymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : undefined
+      if (paid.provider === 'square') order.squarePaymentId = paid.paymentRef
+      else order.stripePaymentIntentId = paid.paymentRef
       await this.em.persistAndFlush(order)
       const site = order.site
       await this.sendOrderEmails(order, site, resolveShopConfig(site.shopConfig)).catch(e =>
