@@ -59,25 +59,25 @@ export class PaymentsService {
   /** The Stripe client, for callers that build their own Checkout sessions. */
   get stripeClient(): Stripe | null { return this.stripe }
 
-  // ── Stripe Connect (Express) ──────────────────────────────────────────
+  // ── Stripe Connect ──────────────────────────────────────────
 
   /** Idempotently ensures the owner has a Connect account; returns its id. */
   async ensureConnectAccount(owner: Owner): Promise<string> {
     if (!this.stripe) throw new BadRequestException('Payments not configured')
     if (owner.stripeAccountId) return owner.stripeAccountId
     const account = await this.stripe.accounts.create({
-      // Not the legacy `type: 'express'`: that shape names the PLATFORM as
-      // the losses collector, and the Connect settings on the Stripe account
-      // are set to Stripe-managed risk, so Stripe rejects it outright. The
-      // controller form says the same things explicitly: Stripe absorbs
-      // negative balances and collects requirements, the platform pays the
-      // fees, and the owner still gets the Express dashboard everything else
-      // here (onboarding links, login links) assumes.
+      // The platform's Connect profile is set to Stripe-managed risk, so
+      // Stripe must be the losses collector. Stripe only pairs that with the
+      // full dashboard (the Express dashboard requires the platform to carry
+      // losses), which makes this the Standard configuration: the owner gets
+      // their own Stripe dashboard at dashboard.stripe.com, Stripe collects
+      // their KYC and payout bank during hosted onboarding, and destination
+      // charges below still settle to them with our application fee taken.
       controller: {
         losses: { payments: 'stripe' },
-        fees: { payer: 'application' },
+        fees: { payer: 'account' },
         requirement_collection: 'stripe',
-        stripe_dashboard: { type: 'express' },
+        stripe_dashboard: { type: 'full' },
       },
       email: owner.email,
       capabilities: {
@@ -259,6 +259,10 @@ export class PaymentsService {
     }
 
     // Mint a Stripe bank-account token and attach as the payout account.
+    // Stripe only allows this where the platform collects requirements; our
+    // accounts are Stripe-managed, so Stripe rejects it and the owner is sent
+    // to their Stripe dashboard instead. Kept for a future platform-managed
+    // configuration.
     const processor = await this.plaid.processorStripeBankAccountTokenCreate({
       access_token: accessToken,
       account_id: plaidAccountId,
