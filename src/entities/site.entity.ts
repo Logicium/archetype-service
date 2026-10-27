@@ -100,6 +100,9 @@ export interface OrderingConfig {
   pickupInstructions?: string
   /** Owner notification email. Falls back to site owner's email. */
   notifyEmail?: string
+  /** Take payment online through the owner's Stripe Connect account. Default true.
+   *  Only takes effect once the owner can accept charges; otherwise orders are pay-at-pickup. */
+  collectPayment?: boolean
 }
 
 /** POS vendors. Clover ships first; the others are accepted by the schema so

@@ -89,6 +89,7 @@ class ProductBody {
   @IsInt() @Min(0) priceCents!: number
   @IsOptional() @IsString() @MaxLength(10) currency?: string
   @IsOptional() @IsString() @MaxLength(1000) imageUrl?: string
+  @IsOptional() @IsString() @MaxLength(160) category?: string
   @IsOptional() @IsInt() @Min(-1) inventory?: number
   @IsOptional() @IsBoolean() active?: boolean
   @IsOptional() @IsInt() sortOrder?: number
@@ -101,6 +102,7 @@ class ProductPatchBody {
   @IsOptional() @IsInt() @Min(0) priceCents?: number
   @IsOptional() @IsString() @MaxLength(10) currency?: string
   @IsOptional() @IsString() @MaxLength(1000) imageUrl?: string
+  @IsOptional() @IsString() @MaxLength(160) category?: string
   @IsOptional() @IsInt() @Min(-1) inventory?: number
   @IsOptional() @IsBoolean() active?: boolean
   @IsOptional() @IsInt() sortOrder?: number

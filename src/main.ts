@@ -47,6 +47,10 @@ async function bootstrap() {
     ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "pos_order_id" varchar(255) NULL;
     ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "pos_synced_at" timestamptz NULL;
     ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "pos_sync_error" text NULL;
+    ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "payment_status" varchar(16) NOT NULL DEFAULT 'unpaid';
+    ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "stripe_session_id" varchar(255) NULL;
+    ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "stripe_payment_intent_id" varchar(255) NULL;
+    ALTER TABLE "${schema}"."product" ADD COLUMN IF NOT EXISTS "category" varchar(160) NULL;
     CREATE TABLE IF NOT EXISTS "${schema}"."page_hit" (
       "id" uuid NOT NULL PRIMARY KEY,
       "site_id" uuid NOT NULL,

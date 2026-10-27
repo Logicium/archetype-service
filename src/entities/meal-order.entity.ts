@@ -4,6 +4,14 @@ import { Site } from './site.entity'
 
 export type MealOrderStatus = 'pending' | 'confirmed' | 'ready' | 'completed' | 'cancelled'
 
+/**
+ * `unpaid`   — pay at pickup (owner not onboarded, or online payment turned off).
+ * `awaiting` — a Stripe Checkout session exists; the customer has not paid yet.
+ *              Holds its pickup slot for CHECKOUT_HOLD_MINUTES, then counts as abandoned.
+ * `paid`     — Stripe confirmed payment; emails and the kitchen ticket go out on this flip.
+ */
+export type MealPaymentStatus = 'unpaid' | 'awaiting' | 'paid'
+
 export interface MealOrderLine {
   menuItemId: string
   sku: string
@@ -21,7 +29,7 @@ export interface MealOrderLine {
  */
 @Entity()
 export class MealOrder {
-  [OptionalProps]?: 'createdAt' | 'updatedAt' | 'status' | 'currency'
+  [OptionalProps]?: 'createdAt' | 'updatedAt' | 'status' | 'currency' | 'paymentStatus'
 
   @PrimaryKey({ type: 'uuid' })
   id: string = randomUUID()
@@ -53,6 +61,17 @@ export class MealOrder {
 
   @Enum({ items: () => ['pending', 'confirmed', 'ready', 'completed', 'cancelled'] as MealOrderStatus[] })
   status: MealOrderStatus = 'pending'
+
+  /* ── Online payment (Stripe Checkout, destination charge to the site owner) ── */
+
+  @Property({ length: 16, default: 'unpaid' })
+  paymentStatus: MealPaymentStatus = 'unpaid'
+
+  @Property({ nullable: true })
+  stripeSessionId?: string
+
+  @Property({ nullable: true })
+  stripePaymentIntentId?: string
 
   /* ── POS sync (kitchen ticket) ──
      posOrderId is set once the order exists in the POS; posSyncError holds the

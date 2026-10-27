@@ -7,7 +7,26 @@ import { OrderingConfig, Site } from '../entities/site.entity'
 import { Owner } from '../entities/owner.entity'
 import { EmailService } from '../common/email.service'
 import { PosService } from '../pos/pos.service'
-import { generateOrderingSlots, resolveOrderingConfig, snapToSlot } from './ordering-config'
+import { PaymentsService } from '../payments/payments.service'
+import { CHECKOUT_HOLD_MINUTES, generateOrderingSlots, resolveOrderingConfig, snapToSlot } from './ordering-config'
+
+/** Returns the `scheme://host` of a trusted origin, or undefined if invalid. */
+function sanitizeOrigin(raw?: string): string | undefined {
+  if (!raw) return undefined
+  try {
+    const u = new URL(raw)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return undefined
+    return `${u.protocol}//${u.host}`
+  } catch {
+    return undefined
+  }
+}
+
+/** A same-site path the storefront wants Stripe to send the customer back to. */
+function sanitizeReturnPath(raw?: string): string {
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return '/menu'
+  return raw.split(/[?#]/)[0] || '/menu'
+}
 
 export interface CreateMealOrderDto {
   siteSlug: string
@@ -42,7 +61,24 @@ export class OrderingService {
     private readonly em: EntityManager,
     private readonly email: EmailService,
     private readonly pos: PosService,
+    private readonly payments: PaymentsService,
   ) {}
+
+  /**
+   * Orders that occupy a pickup slot: anything live, except unpaid Stripe
+   * checkouts whose session has expired — those are abandoned carts and must
+   * not block the slot for the next customer.
+   */
+  private liveOrderWhere() {
+    const holdCutoff = new Date(Date.now() - CHECKOUT_HOLD_MINUTES * 60_000)
+    return {
+      status: { $in: ['pending', 'confirmed', 'ready'] as MealOrder['status'][] },
+      $or: [
+        { paymentStatus: { $ne: 'awaiting' as const } },
+        { createdAt: { $gte: holdCutoff } },
+      ],
+    }
+  }
 
   // ----- Public -----
 
@@ -66,7 +102,7 @@ export class OrderingService {
     const windowEnd = new Date(Date.now() + (config.windowDays + 1) * 86400_000)
     const upcoming = await this.orders.find({
       site,
-      status: { $in: ['pending', 'confirmed', 'ready'] },
+      ...this.liveOrderWhere(),
       pickupAt: { $gte: new Date(), $lte: windowEnd },
     })
     const countByStart = new Map<string, number>()
@@ -84,7 +120,11 @@ export class OrderingService {
     }
   }
 
-  async createOrder(dto: CreateMealOrderDto) {
+  /**
+   * Validates the cart and pickup slot, snapshots prices, and persists the
+   * order. Shared by the pay-at-pickup and Stripe paths; sends nothing.
+   */
+  private async buildOrder(dto: CreateMealOrderDto) {
     const site = await this.sites.findOne({ slug: dto.siteSlug }, { populate: ['owner'] })
     if (!site) throw new NotFoundException('Site not found')
     if (!site.addOns?.includes('ordering')) throw new ForbiddenException('Ordering not enabled for this site')
@@ -104,7 +144,7 @@ export class OrderingService {
     const sameSlot = await this.orders.count({
       site,
       pickupAt,
-      status: { $in: ['pending', 'confirmed', 'ready'] },
+      ...this.liveOrderWhere(),
     })
     if (sameSlot >= config.maxOrdersPerSlot) throw new BadRequestException('That pickup slot is full')
 
@@ -150,15 +190,116 @@ export class OrderingService {
     })
     await this.em.persistAndFlush(order)
 
+    return { order, site, config }
+  }
+
+  /**
+   * Emails both parties and prints the kitchen ticket. Runs once per order:
+   * immediately for pay-at-pickup, or when Stripe confirms payment.
+   * pushOrder never throws and records its own failure on the order, so a
+   * POS outage cannot fail the customer's checkout — the dashboard shows the
+   * error and offers a resend.
+   */
+  private async fulfilPlacedOrder(order: MealOrder, site: Site, config: Required<OrderingConfig>) {
     await this.sendOrderEmails(order, site, config).catch(e =>
       this.logger.error(`Meal order email failed: ${(e as Error).message}`),
     )
-
-    // Print the kitchen ticket. pushOrder never throws and records its own
-    // failure on the order, so a POS outage cannot fail the customer's
-    // checkout — the dashboard shows the error and offers a resend.
     await this.pos.pushOrder(order, site)
+  }
 
+  /** Pay-at-pickup order (owner not payment-onboarded, online payment off, or demo). */
+  async createOrder(dto: CreateMealOrderDto) {
+    const { order, site, config } = await this.buildOrder(dto)
+    await this.fulfilPlacedOrder(order, site, config)
+    return this.publicOrder(order)
+  }
+
+  /**
+   * Create a pending order and a Stripe Checkout session that settles to the
+   * site owner's Connect account. Falls back to a pay-at-pickup order (with
+   * `checkoutUrl: null`) when the owner can't accept charges yet, Stripe isn't
+   * configured, or the site has turned online payment off — the storefront
+   * then shows its ordinary confirmation.
+   */
+  async createCheckoutSession(dto: CreateMealOrderDto, origin?: string, returnPath?: string) {
+    const { order, site, config } = await this.buildOrder(dto)
+
+    if (!config.collectPayment) {
+      await this.fulfilPlacedOrder(order, site, config)
+      return { orderId: order.id, checkoutUrl: null as string | null, order: this.publicOrder(order) }
+    }
+
+    const base = sanitizeOrigin(origin)
+      || site.vercelProductionUrl
+      || process.env.PUBLIC_APP_URL
+      || 'http://localhost:5173'
+    const path = sanitizeReturnPath(returnPath)
+    const cleanBase = base.replace(/\/$/, '')
+    const successUrl = `${cleanBase}${path}?order=${order.id}&status=success`
+    const cancelUrl = `${cleanBase}${path}?order=${order.id}&status=cancelled`
+
+    const lineItems = order.items.map(i => ({
+      quantity: i.quantity,
+      price_data: {
+        currency: config.currency.toLowerCase(),
+        product_data: { name: i.name, ...(i.notes ? { description: i.notes.slice(0, 500) } : {}) },
+        unit_amount: i.unitPriceCents,
+      },
+    }))
+
+    const checkout = await this.payments.createDestinationCheckout({
+      owner: site.owner,
+      lineItems,
+      successUrl,
+      cancelUrl,
+      customerEmail: order.email,
+      metadata: { mealOrderId: order.id, siteId: site.id },
+      expiresAt: Math.floor(Date.now() / 1000) + CHECKOUT_HOLD_MINUTES * 60,
+    }).catch(e => {
+      this.logger.warn(`Meal checkout session failed, falling back to pay-at-pickup: ${(e as Error).message}`)
+      return null
+    })
+
+    if (!checkout) {
+      await this.fulfilPlacedOrder(order, site, config)
+      return { orderId: order.id, checkoutUrl: null as string | null, order: this.publicOrder(order) }
+    }
+
+    order.paymentStatus = 'awaiting'
+    order.stripeSessionId = checkout.sessionId
+    await this.em.persistAndFlush(order)
+    return { orderId: order.id, checkoutUrl: checkout.url, order: this.publicOrder(order) }
+  }
+
+  /**
+   * Verify a checkout session with Stripe and mark the order paid. Reached
+   * from the storefront success redirect AND the Connect webhook; idempotent,
+   * so whichever lands first does the work and the other is a no-op.
+   */
+  async confirmCheckout(orderId: string) {
+    const order = await this.orders.findOne({ id: orderId }, { populate: ['site', 'site.owner'] as never })
+    if (!order) throw new NotFoundException('Order not found')
+    if (order.paymentStatus !== 'awaiting' || !order.stripeSessionId) return this.publicOrder(order)
+    const stripe = this.payments.stripeClient
+    if (!stripe) return this.publicOrder(order)
+
+    const session = await stripe.checkout.sessions.retrieve(order.stripeSessionId)
+    if (session.payment_status === 'paid') {
+      const paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : undefined
+      // The webhook and the success redirect race each other; a conditional
+      // UPDATE lets exactly one of them win and send the emails / ticket.
+      const won = await this.em.nativeUpdate(
+        MealOrder,
+        { id: order.id, paymentStatus: 'awaiting' },
+        { paymentStatus: 'paid', stripePaymentIntentId: paymentIntentId },
+      )
+      order.paymentStatus = 'paid'
+      order.stripePaymentIntentId = paymentIntentId
+      if (won === 1) {
+        const site = order.site
+        await this.fulfilPlacedOrder(order, site, resolveOrderingConfig(site.orderingConfig))
+      }
+    }
     return this.publicOrder(order)
   }
 
@@ -237,7 +378,12 @@ export class OrderingService {
 
   async listOrders(siteId: string, owner: Owner) {
     const site = await this.assertOwned(siteId, owner)
-    const all = await this.orders.find({ site }, { orderBy: { pickupAt: 'ASC' } })
+    // Abandoned checkouts (never paid, session expired) are noise to a kitchen.
+    const holdCutoff = new Date(Date.now() - CHECKOUT_HOLD_MINUTES * 60_000)
+    const all = await this.orders.find({
+      site,
+      $or: [{ paymentStatus: { $ne: 'awaiting' } }, { createdAt: { $gte: holdCutoff } }],
+    }, { orderBy: { pickupAt: 'ASC' } })
     return all.map(o => this.publicOrder(o))
   }
 
@@ -304,6 +450,7 @@ export class OrderingService {
       totalCents: o.totalCents,
       currency: o.currency,
       status: o.status,
+      paymentStatus: o.paymentStatus,
       createdAt: o.createdAt.toISOString(),
       // POS sync state — drives the dashboard's ticket badge + resend button.
       posOrderId: o.posOrderId ?? null,
@@ -325,6 +472,7 @@ export class OrderingService {
       const note = it.notes ? ` <em>(${escapeHtml(it.notes)})</em>` : ''
       return `<li>${escapeHtml(it.name)} × ${it.quantity} — ${escapeHtml(fmt(it.lineTotalCents))}${note}</li>`
     }).join('')
+    const paymentLine = order.paymentStatus === 'paid' ? 'Paid online' : 'Pay at pickup'
 
     await this.email.send({
       to: order.email,
@@ -333,7 +481,7 @@ export class OrderingService {
         <p>Hi ${escapeHtml(order.name)},</p>
         <p>We've got your order. Pickup at <strong>${escapeHtml(pickupLocal)}</strong>.</p>
         <ul>${itemsHtml}</ul>
-        <p><strong>Total: ${escapeHtml(total)}</strong></p>
+        <p><strong>Total: ${escapeHtml(total)}</strong> · ${paymentLine}</p>
         ${config.pickupInstructions ? `<p>${escapeHtml(config.pickupInstructions)}</p>` : ''}
       `,
     })
@@ -347,7 +495,7 @@ export class OrderingService {
           <p>New order from <strong>${escapeHtml(order.name)}</strong> (${escapeHtml(order.email)})${order.phone ? ` · ${escapeHtml(order.phone)}` : ''}</p>
           <p>Pickup: <strong>${escapeHtml(pickupLocal)}</strong></p>
           <ul>${itemsHtml}</ul>
-          <p><strong>Total: ${escapeHtml(total)}</strong></p>
+          <p><strong>Total: ${escapeHtml(total)}</strong> · ${paymentLine}</p>
           ${order.notes ? `<p><em>${escapeHtml(order.notes)}</em></p>` : ''}
         `,
       })

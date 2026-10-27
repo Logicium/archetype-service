@@ -15,6 +15,7 @@ import {
   ValidateNested,
 } from 'class-validator'
 import { Type } from 'class-transformer'
+import type { Request } from 'express'
 import { OrderingService } from './ordering.service'
 import type { OrderingConfig } from '../entities/site.entity'
 import { JwtAuthGuard, AuthRequest } from '../auth/jwt.guard'
@@ -36,6 +37,11 @@ class CreateMealOrderBody {
   items!: MealOrderItemBody[]
 }
 
+class CheckoutMealOrderBody extends CreateMealOrderBody {
+  /** Same-site path Stripe sends the customer back to (e.g. "/menu"). */
+  @IsOptional() @IsString() @MaxLength(300) returnPath?: string
+}
+
 @ApiTags('ordering')
 @Controller('v1/ordering')
 export class OrderingController {
@@ -54,6 +60,20 @@ export class OrderingController {
   @Post('orders')
   create(@Body() body: CreateMealOrderBody) {
     return this.ordering.createOrder(body)
+  }
+
+  /** Create a pending order + Stripe Checkout session (destination charge to the site owner). */
+  @Post('checkout')
+  checkout(@Body() body: CheckoutMealOrderBody, @Req() req: Request) {
+    const origin = (req.headers.origin as string | undefined) || (req.headers.referer as string | undefined)
+    const { returnPath, ...dto } = body
+    return this.ordering.createCheckoutSession(dto, origin, returnPath)
+  }
+
+  /** Confirm payment on the storefront success redirect (verifies with Stripe). */
+  @Post('orders/:id/confirm')
+  confirm(@Param('id') id: string) {
+    return this.ordering.confirmCheckout(id)
   }
 
   @Get('orders/:id')

@@ -39,6 +39,7 @@ export interface ProductInput {
   priceCents: number
   currency?: string
   imageUrl?: string
+  category?: string
   inventory?: number
   active?: boolean
   sortOrder?: number
@@ -273,6 +274,7 @@ export class ShopService {
       priceCents: input.priceCents,
       currency: input.currency ?? resolveShopConfig(site.shopConfig).currency,
       imageUrl: input.imageUrl,
+      category: input.category?.trim() || undefined,
       inventory: input.inventory ?? -1,
       active: input.active ?? true,
       sortOrder: input.sortOrder ?? 0,
@@ -302,6 +304,7 @@ export class ShopService {
     }
     if (input.currency != null) product.currency = input.currency
     if (input.imageUrl !== undefined) product.imageUrl = input.imageUrl
+    if (input.category !== undefined) product.category = input.category?.trim() || undefined
     if (input.inventory != null) product.inventory = input.inventory
     if (input.active != null) product.active = input.active
     if (input.sortOrder != null) product.sortOrder = input.sortOrder
@@ -375,6 +378,7 @@ export class ShopService {
       priceCents: p.priceCents,
       currency: p.currency,
       imageUrl: p.imageUrl,
+      category: p.category,
       inventory: p.inventory,
       active: p.active,
       sortOrder: p.sortOrder,

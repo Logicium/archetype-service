@@ -24,6 +24,7 @@ import { OrderingModule } from './ordering/ordering.module'
 import { PosModule } from './pos/pos.module'
 import { TicketingModule } from './ticketing/ticketing.module'
 import { PaymentsModule } from './payments/payments.module'
+import { ConnectWebhookModule } from './payments/connect-webhook.module'
 import { AccountModule } from './account/account.module'
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
@@ -62,6 +63,7 @@ const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
     PosModule,
     TicketingModule,
     PaymentsModule,
+    ConnectWebhookModule,
     AccountModule,
   ],
 })

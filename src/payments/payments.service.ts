@@ -138,6 +138,8 @@ export class PaymentsService {
     metadata?: Record<string, string>
     /** Optional platform fee in the smallest currency unit. */
     applicationFeeCents?: number
+    /** Session expiry as a unix timestamp (seconds). Stripe allows 30 min to 24 h from now. */
+    expiresAt?: number
   }): Promise<{ sessionId: string; url: string | null } | null> {
     if (!this.stripe) return null
     if (!params.owner.stripeAccountId || !params.owner.stripeChargesEnabled) return null
@@ -149,6 +151,7 @@ export class PaymentsService {
       success_url: params.successUrl,
       cancel_url: params.cancelUrl,
       metadata: params.metadata,
+      ...(params.expiresAt ? { expires_at: params.expiresAt } : {}),
       payment_intent_data: {
         transfer_data: { destination: params.owner.stripeAccountId },
         ...(params.applicationFeeCents && params.applicationFeeCents > 0
@@ -157,6 +160,41 @@ export class PaymentsService {
       },
     })
     return { sessionId: session.id, url: session.url }
+  }
+
+  // ── Connect webhooks ──────────────────────────────────────────────────
+
+  /**
+   * Verifies a webhook delivered to the Connect platform account. This is a
+   * different Stripe account from the one OrdersService bills on, so it has
+   * its own signing secret; when the two run on one account the ordinary
+   * STRIPE_WEBHOOK_SECRET is accepted as well.
+   */
+  constructConnectEvent(rawBody: Buffer, signature: string): Stripe.Event {
+    if (!this.stripe) throw new BadRequestException('Payments not configured')
+    const secret = process.env.STRIPE_CONNECT_WEBHOOK_SECRET
+      || (!process.env.STRIPE_CONNECT_SECRET_KEY ? process.env.STRIPE_WEBHOOK_SECRET : undefined)
+    if (!secret) throw new BadRequestException('STRIPE_CONNECT_WEBHOOK_SECRET not set')
+    try {
+      return this.stripe.webhooks.constructEvent(rawBody, signature, secret)
+    } catch (e) {
+      throw new BadRequestException(`Webhook signature failed: ${(e as Error).message}`)
+    }
+  }
+
+  /**
+   * `account.updated` — cache the connected account's live capabilities so
+   * checkout gating is right even if the owner never reopens the Payments
+   * page after finishing onboarding.
+   */
+  async syncAccountFromWebhook(account: Stripe.Account): Promise<void> {
+    const owner = await this.owners.findOne({ stripeAccountId: account.id })
+    if (!owner) return
+    owner.stripeChargesEnabled = !!account.charges_enabled
+    owner.stripePayoutsEnabled = !!account.payouts_enabled
+    owner.stripeDetailsSubmitted = !!account.details_submitted
+    await this.em.persistAndFlush(owner)
+    this.logger.log(`Connect account ${account.id} synced for ${owner.email}: charges=${owner.stripeChargesEnabled} payouts=${owner.stripePayoutsEnabled}`)
   }
 
   // ── Plaid bank linking ────────────────────────────────────────────────

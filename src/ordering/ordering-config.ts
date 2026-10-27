@@ -18,7 +18,17 @@ export const DEFAULT_ORDERING_CONFIG: Required<OrderingConfig> = {
   windowDays: 14,
   pickupInstructions: '',
   notifyEmail: '',
+  collectPayment: true,
 }
+
+/**
+ * How long an unpaid Stripe Checkout keeps its pickup slot. Matches the
+ * session's `expires_at` so an abandoned checkout frees the slot exactly when
+ * the customer can no longer pay for it. Stripe's minimum is 30 minutes
+ * measured on its own clock; the extra margin keeps a slightly slow server
+ * clock from tripping that validation.
+ */
+export const CHECKOUT_HOLD_MINUTES = 35
 
 export function resolveOrderingConfig(override?: OrderingConfig | null): Required<OrderingConfig> {
   return {
@@ -31,6 +41,7 @@ export function resolveOrderingConfig(override?: OrderingConfig | null): Require
     windowDays: override?.windowDays ?? DEFAULT_ORDERING_CONFIG.windowDays,
     pickupInstructions: override?.pickupInstructions ?? DEFAULT_ORDERING_CONFIG.pickupInstructions,
     notifyEmail: override?.notifyEmail ?? DEFAULT_ORDERING_CONFIG.notifyEmail,
+    collectPayment: override?.collectPayment ?? DEFAULT_ORDERING_CONFIG.collectPayment,
   }
 }
 

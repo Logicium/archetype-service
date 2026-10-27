@@ -72,7 +72,10 @@ export interface Product {
   badge?: string
   url?: string
 }
-export interface Category { name: string; image: string; imageAlt?: string; url?: string; count?: number }
+/** A product category tile. `children` are its subcategories, shown in the
+ *  catalog nav dropdown and used to deep-link the shop (`/shop?category=…&sub=…`). */
+export interface CategoryChild { name: string; url?: string }
+export interface Category { name: string; image: string; imageAlt?: string; url?: string; count?: number; children?: CategoryChild[] }
 export interface VaultPhotos { hero: PhotoSlot; about: PhotoSlot; storefront: PhotoSlot; gallery: PhotoSlot[] }
 export interface VaultSiteConfig {
   brand: string
@@ -87,6 +90,8 @@ export interface VaultSiteConfig {
   story: Story
   featured: Product[]
   categories: Category[]
+  /** Header menu for the shop: plain links, or a catalog dropdown built from `categories`. */
+  navMenu?: 'links' | 'catalog'
   testimonials: Testimonial[]
   shopUrl: string
   social: SocialLink[]

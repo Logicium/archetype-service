@@ -37,6 +37,12 @@ export class Product {
   @Property({ nullable: true })
   imageUrl?: string
 
+  /** Storefront grouping, "Apparel / Hats". Matches a category (and optional
+   *  subcategory) from the site's content so the catalog nav can deep-link
+   *  straight to it. Free text so a kitchen can file a one-off anywhere. */
+  @Property({ type: 'string', length: 160, nullable: true })
+  category?: string
+
   /** Stock count. -1 means unlimited. */
   @Property({ default: -1 })
   inventory: number = -1
