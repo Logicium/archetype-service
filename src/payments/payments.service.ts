@@ -66,7 +66,19 @@ export class PaymentsService {
     if (!this.stripe) throw new BadRequestException('Payments not configured')
     if (owner.stripeAccountId) return owner.stripeAccountId
     const account = await this.stripe.accounts.create({
-      type: 'express',
+      // Not the legacy `type: 'express'`: that shape names the PLATFORM as
+      // the losses collector, and the Connect settings on the Stripe account
+      // are set to Stripe-managed risk, so Stripe rejects it outright. The
+      // controller form says the same things explicitly: Stripe absorbs
+      // negative balances and collects requirements, the platform pays the
+      // fees, and the owner still gets the Express dashboard everything else
+      // here (onboarding links, login links) assumes.
+      controller: {
+        losses: { payments: 'stripe' },
+        fees: { payer: 'application' },
+        requirement_collection: 'stripe',
+        stripe_dashboard: { type: 'express' },
+      },
       email: owner.email,
       capabilities: {
         card_payments: { requested: true },
