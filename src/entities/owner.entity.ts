@@ -51,7 +51,7 @@ export class Owner {
   // ── Payments: Square (OAuth on the owner's own Square account) ──
   // Which provider storefront checkouts run through when both are connected.
   // Unset means "whichever is connected, Stripe first" (see PaymentsService).
-  @Property({ length: 16, nullable: true })
+  @Property({ type: 'string', length: 16, nullable: true })
   paymentProvider?: PaymentProvider
 
   @Property({ nullable: true })
