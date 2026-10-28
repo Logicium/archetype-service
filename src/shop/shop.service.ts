@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { InjectRepository } from '@mikro-orm/nestjs'
 import { EntityManager, EntityRepository } from '@mikro-orm/postgresql'
 import { Product } from '../entities/product.entity'
-import { ShopOrder, ShopOrderItem, ShippingAddress, FulfillmentType } from '../entities/shop-order.entity'
+import { ShopOrder, ShopOrderItem, ShippingAddress, FulfillmentType, FulfillmentStatus, FulfillmentEvent } from '../entities/shop-order.entity'
 import { ShopConfig, Site } from '../entities/site.entity'
 import { Owner } from '../entities/owner.entity'
 import { EmailService } from '../common/email.service'
@@ -30,6 +30,50 @@ export interface CreateShopOrderDto {
   fulfillment: FulfillmentType
   shippingAddress?: ShippingAddress
   items: Array<{ productId: string; quantity: number }>
+  /** "/order" from the checkout page; older storefronts send nothing and land back on /shop. */
+  returnPath?: string
+}
+
+export interface FulfillmentInput {
+  status: FulfillmentStatus
+  trackingNumber?: string
+  trackingCarrier?: string
+  trackingUrl?: string
+  note?: string
+  notify?: boolean
+}
+
+/** Which steps make sense for each fulfillment type, in order. */
+export const FULFILLMENT_STEPS: Record<FulfillmentType, FulfillmentStatus[]> = {
+  shipping: ['received', 'label_printed', 'shipped', 'delivered'],
+  pickup: ['received', 'ready_for_pickup', 'picked_up'],
+}
+
+const STEP_LABEL: Record<FulfillmentStatus, string> = {
+  received: 'Order received',
+  label_printed: 'Label printed',
+  shipped: 'Shipped',
+  delivered: 'Delivered',
+  ready_for_pickup: 'Ready for pickup',
+  picked_up: 'Picked up',
+}
+
+/** Public tracking page for the common carriers, when the owner gives no URL. */
+function carrierTrackingUrl(carrier: string | undefined, number: string | undefined): string | undefined {
+  if (!number) return undefined
+  const c = (carrier || '').toLowerCase().replace(/[^a-z]/g, '')
+  const n = encodeURIComponent(number.trim())
+  if (c.includes('usps')) return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${n}`
+  if (c.includes('ups')) return `https://www.ups.com/track?tracknum=${n}`
+  if (c.includes('fedex')) return `https://www.fedex.com/fedextrack/?trknbr=${n}`
+  if (c.includes('dhl')) return `https://www.dhl.com/en/express/tracking.html?AWB=${n}`
+  return undefined
+}
+
+/** Where this site lives on the web, for links in customer emails. */
+function siteUrl(site: Site): string | null {
+  const base = site.customDomain ? `https://${site.customDomain}` : site.vercelProductionUrl
+  return base ? base.replace(/\/$/, '') : null
 }
 
 export interface ProductInput {
@@ -180,8 +224,15 @@ export class ShopService {
       || process.env.PUBLIC_APP_URL
       || 'http://localhost:5173'
     const cleanBase = base.replace(/\/$/, '')
-    const successUrl = `${cleanBase}/shop?order=${order.id}&status=success`
-    const cancelUrl = `${cleanBase}/shop?order=${order.id}&status=cancelled`
+    // The checkout page sends the buyer to the order status page afterwards;
+    // storefronts built before it still land back on /shop.
+    const orderPage = dto.returnPath === '/order'
+    const successUrl = orderPage
+      ? `${cleanBase}/order/${order.id}?status=success`
+      : `${cleanBase}/shop?order=${order.id}&status=success`
+    const cancelUrl = orderPage
+      ? `${cleanBase}/checkout?order=${order.id}&status=cancelled`
+      : `${cleanBase}/shop?order=${order.id}&status=cancelled`
 
     const lineItems = order.items.map(i => ({
       quantity: i.quantity,
@@ -209,6 +260,7 @@ export class ShopService {
       cancelUrl,
       customerEmail: order.email,
       metadata: { shopOrderId: order.id, siteId: site.id },
+      sourceName: site.displayName || site.slug,
     }).catch(e => {
       this.logger.warn(`Shop checkout session failed, falling back to no-payment: ${(e as Error).message}`)
       return null
@@ -251,9 +303,10 @@ export class ShopService {
   }
 
   async getPublicOrder(id: string) {
-    const order = await this.orders.findOne({ id })
+    const order = await this.orders.findOne({ id }, { populate: ['site'] })
     if (!order) throw new NotFoundException('Order not found')
-    return this.publicOrder(order)
+    const config = resolveShopConfig(order.site.shopConfig)
+    return { ...this.publicOrder(order), pickupInstructions: config.pickupInstructions || null }
   }
 
   // ----- Admin: products -----
@@ -333,8 +386,57 @@ export class ShopService {
     const site = await this.assertOwned(siteId, owner)
     const order = await this.orders.findOne({ id: orderId, site })
     if (!order) throw new NotFoundException('Order not found')
+    const was = order.status
     order.status = status
     await this.em.flush()
+    if (status === 'cancelled' && was !== 'cancelled') {
+      await this.sendStatusEmail(order, site, {
+        subject: `Your order from ${site.displayName || site.slug} was cancelled`,
+        headline: 'Your order was cancelled.',
+        body: 'If you were charged, the refund is on its way back to your card. Reply to this email with any questions.',
+      }).catch(e => this.logger.error(`Shop cancellation email failed: ${(e as Error).message}`))
+    }
+    return this.publicOrder(order)
+  }
+
+  /**
+   * Advance the fulfillment tracker. Steps are validated against the order's
+   * fulfillment type, every change is appended to the history the customer
+   * sees on their order page, and the customer is emailed unless told not to.
+   */
+  async updateFulfillment(siteId: string, owner: Owner, orderId: string, input: FulfillmentInput) {
+    const site = await this.assertOwned(siteId, owner)
+    const order = await this.orders.findOne({ id: orderId, site })
+    if (!order) throw new NotFoundException('Order not found')
+    if (order.status === 'cancelled') throw new BadRequestException('This order was cancelled')
+    if (!FULFILLMENT_STEPS[order.fulfillment].includes(input.status)) {
+      throw new BadRequestException(`"${STEP_LABEL[input.status]}" does not apply to a ${order.fulfillment} order`)
+    }
+
+    const trackingNumber = input.trackingNumber?.trim() || order.trackingNumber
+    const trackingCarrier = input.trackingCarrier?.trim() || order.trackingCarrier
+    if (input.status === 'shipped' && !trackingNumber) {
+      throw new BadRequestException('Add the tracking number before marking the order shipped')
+    }
+    order.trackingNumber = trackingNumber
+    order.trackingCarrier = trackingCarrier
+    order.trackingUrl = input.trackingUrl?.trim() || order.trackingUrl || carrierTrackingUrl(trackingCarrier, trackingNumber)
+    const note = input.note?.trim() || undefined
+    if (note) order.fulfillmentNote = note
+
+    const changed = order.fulfillmentStatus !== input.status
+    order.fulfillmentStatus = input.status
+    order.fulfillmentUpdatedAt = new Date()
+    const event: FulfillmentEvent = { status: input.status, at: order.fulfillmentUpdatedAt.toISOString(), ...(note ? { note } : {}) }
+    order.fulfillmentHistory = [...(order.fulfillmentHistory ?? []), event]
+    // The last step closes the order's lifecycle too.
+    if (input.status === 'delivered' || input.status === 'picked_up') order.status = 'fulfilled'
+    await this.em.flush()
+
+    if (input.notify !== false && (changed || note || input.status === 'shipped')) {
+      await this.sendFulfillmentEmail(order, site).catch(e =>
+        this.logger.error(`Shop fulfillment email failed: ${(e as Error).message}`))
+    }
     return this.publicOrder(order)
   }
 
@@ -402,7 +504,79 @@ export class ShopService {
       currency: o.currency,
       status: o.status,
       createdAt: o.createdAt.toISOString(),
+      fulfillmentStatus: o.fulfillmentStatus ?? 'received',
+      trackingNumber: o.trackingNumber ?? null,
+      trackingCarrier: o.trackingCarrier ?? null,
+      trackingUrl: o.trackingUrl ?? null,
+      fulfillmentNote: o.fulfillmentNote ?? null,
+      fulfillmentHistory: o.fulfillmentHistory ?? [],
+      fulfillmentUpdatedAt: o.fulfillmentUpdatedAt ? o.fulfillmentUpdatedAt.toISOString() : null,
     }
+  }
+
+  /** One short customer email per fulfillment step. */
+  private async sendFulfillmentEmail(order: ShopOrder, site: Site) {
+    const siteName = site.displayName || site.slug
+    const config = resolveShopConfig(site.shopConfig)
+    const tracking = order.trackingNumber
+      ? `<p>Tracking${order.trackingCarrier ? ` (${escapeHtml(order.trackingCarrier)})` : ''}: ${order.trackingUrl
+          ? `<a href="${escapeHtml(order.trackingUrl)}">${escapeHtml(order.trackingNumber)}</a>`
+          : `<strong>${escapeHtml(order.trackingNumber)}</strong>`}</p>`
+      : ''
+    const copy: Record<FulfillmentStatus, { subject: string; headline: string; body: string }> = {
+      received: {
+        subject: `We have your order from ${siteName}`,
+        headline: 'We have your order.',
+        body: 'It is in the queue and we will let you know as it moves along.',
+      },
+      label_printed: {
+        subject: `Your ${siteName} order is being packed`,
+        headline: 'Your order is being packed.',
+        body: 'The shipping label is printed and your package goes out shortly. You will get another email with tracking once it ships.',
+      },
+      shipped: {
+        subject: `Your ${siteName} order is on its way`,
+        headline: 'Your order has shipped.',
+        body: 'It is on its way to you. Use the tracking number below to follow it.',
+      },
+      delivered: {
+        subject: `Your ${siteName} order was delivered`,
+        headline: 'Your order was delivered.',
+        body: 'We hope you love it. Reply to this email if anything is not right.',
+      },
+      ready_for_pickup: {
+        subject: `Your ${siteName} order is ready for pickup`,
+        headline: 'Your order is ready for pickup.',
+        body: config.pickupInstructions || 'Come by whenever suits you during opening hours.',
+      },
+      picked_up: {
+        subject: `Thanks for picking up your ${siteName} order`,
+        headline: 'Thanks for picking up your order.',
+        body: 'We hope you love it. Reply to this email if anything is not right.',
+      },
+    }
+    const c = copy[order.fulfillmentStatus]
+    await this.sendStatusEmail(order, site, { ...c, extraHtml: tracking })
+  }
+
+  /** Shared shell for every status email: headline, body, owner note, order link. */
+  private async sendStatusEmail(order: ShopOrder, site: Site, msg: { subject: string; headline: string; body: string; extraHtml?: string }) {
+    const siteName = site.displayName || site.slug
+    const link = siteUrl(site)
+    const itemsHtml = order.items.map(it => `<li>${escapeHtml(it.name)} × ${it.quantity}</li>`).join('')
+    await this.email.send({
+      to: order.email,
+      subject: msg.subject,
+      html: `
+        <p>Hi ${escapeHtml(order.name)},</p>
+        <p><strong>${escapeHtml(msg.headline)}</strong> ${escapeHtml(msg.body)}</p>
+        ${order.fulfillmentNote ? `<p><em>From ${escapeHtml(siteName)}:</em> ${escapeHtml(order.fulfillmentNote)}</p>` : ''}
+        ${msg.extraHtml ?? ''}
+        <ul>${itemsHtml}</ul>
+        ${link ? `<p><a href="${escapeHtml(link)}/order/${order.id}">View your order</a></p>` : ''}
+        <p>${escapeHtml(siteName)}</p>
+      `,
+    })
   }
 
   private async sendOrderEmails(order: ShopOrder, site: Site, config: Required<ShopConfig>) {
@@ -430,6 +604,7 @@ export class ShopService {
         <ul>${itemsHtml}</ul>
         <p>Subtotal: ${escapeHtml(subtotal)}${shipping ? `<br />Shipping: ${escapeHtml(shipping)}` : ''}<br /><strong>Total: ${escapeHtml(total)}</strong></p>
         ${fulfillmentBlock}
+        ${siteUrl(site) ? `<p><a href="${escapeHtml(siteUrl(site) as string)}/order/${order.id}">Track your order</a> — we will email you at each step.</p>` : ''}
       `,
     })
 

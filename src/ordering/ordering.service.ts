@@ -235,8 +235,15 @@ export class OrderingService {
       || 'http://localhost:5173'
     const path = sanitizeReturnPath(returnPath)
     const cleanBase = base.replace(/\/$/, '')
-    const successUrl = `${cleanBase}${path}?order=${order.id}&status=success`
-    const cancelUrl = `${cleanBase}${path}?order=${order.id}&status=cancelled`
+    // The checkout page returns the customer to the order status page; menus
+    // built before it still land back where they ordered from.
+    const orderPage = path === '/order'
+    const successUrl = orderPage
+      ? `${cleanBase}/order/${order.id}?status=success`
+      : `${cleanBase}${path}?order=${order.id}&status=success`
+    const cancelUrl = orderPage
+      ? `${cleanBase}/checkout?order=${order.id}&status=cancelled`
+      : `${cleanBase}${path}?order=${order.id}&status=cancelled`
 
     const lineItems = order.items.map(i => ({
       quantity: i.quantity,
@@ -254,6 +261,7 @@ export class OrderingService {
       cancelUrl,
       customerEmail: order.email,
       metadata: { mealOrderId: order.id, siteId: site.id },
+      sourceName: site.displayName || site.slug,
       expiresAt: Math.floor(Date.now() / 1000) + CHECKOUT_HOLD_MINUTES * 60,
     }).catch(e => {
       this.logger.warn(`Meal checkout session failed, falling back to pay-at-pickup: ${(e as Error).message}`)
@@ -306,9 +314,10 @@ export class OrderingService {
   }
 
   async getPublicOrder(id: string) {
-    const order = await this.orders.findOne({ id })
+    const order = await this.orders.findOne({ id }, { populate: ['site'] })
     if (!order) throw new NotFoundException('Order not found')
-    return this.publicOrder(order)
+    const config = resolveOrderingConfig(order.site.orderingConfig)
+    return { ...this.publicOrder(order), pickupInstructions: config.pickupInstructions || null, timezone: config.timezone }
   }
 
   // ----- Admin: menu items -----
@@ -393,9 +402,40 @@ export class OrderingService {
     const site = await this.assertOwned(siteId, owner)
     const order = await this.orders.findOne({ id: orderId, site })
     if (!order) throw new NotFoundException('Order not found')
+    const was = order.status
     order.status = status
     await this.em.flush()
+    if (was !== status && status !== 'pending') {
+      await this.sendStatusEmail(order, site, status).catch(e =>
+        this.logger.error(`Meal order status email failed: ${(e as Error).message}`))
+    }
     return this.publicOrder(order)
+  }
+
+  /** Customer email for each kitchen-side status the owner sets. */
+  private async sendStatusEmail(order: MealOrder, site: Site, status: 'confirmed' | 'ready' | 'completed' | 'cancelled') {
+    const config = resolveOrderingConfig(site.orderingConfig)
+    const siteName = site.displayName || site.slug
+    const pickupLocal = new Intl.DateTimeFormat('en-US', { timeZone: config.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(order.pickupAt)
+    const copy = {
+      confirmed: { subject: `${siteName} confirmed your order`, headline: 'Your order is confirmed.', body: `We are on it. Pickup at ${pickupLocal}.` },
+      ready: { subject: `Your ${siteName} order is ready`, headline: 'Your order is ready for pickup.', body: config.pickupInstructions || 'Come on in whenever you are ready.' },
+      completed: { subject: `Thanks from ${siteName}`, headline: 'Thanks for your order.', body: 'We hope you enjoyed it. See you next time.' },
+      cancelled: { subject: `Your ${siteName} order was cancelled`, headline: 'Your order was cancelled.', body: 'If you paid online, the refund is on its way back to your card. Reply to this email with any questions.' },
+    }[status]
+    const base = site.customDomain ? `https://${site.customDomain}` : site.vercelProductionUrl
+    const itemsHtml = order.items.map(it => `<li>${escapeHtml(it.name)} × ${it.quantity}</li>`).join('')
+    await this.email.send({
+      to: order.email,
+      subject: copy.subject,
+      html: `
+        <p>Hi ${escapeHtml(order.name)},</p>
+        <p><strong>${escapeHtml(copy.headline)}</strong> ${escapeHtml(copy.body)}</p>
+        <ul>${itemsHtml}</ul>
+        ${base ? `<p><a href="${escapeHtml(base.replace(/\/$/, ''))}/order/${order.id}">View your order</a></p>` : ''}
+        <p>${escapeHtml(siteName)}</p>
+      `,
+    })
   }
 
   // ----- Admin: config -----
@@ -475,6 +515,8 @@ export class OrderingService {
       return `<li>${escapeHtml(it.name)} × ${it.quantity} — ${escapeHtml(fmt(it.lineTotalCents))}${note}</li>`
     }).join('')
     const paymentLine = order.paymentStatus === 'paid' ? 'Paid online' : 'Pay at pickup'
+    const siteBase = site.customDomain ? `https://${site.customDomain}` : site.vercelProductionUrl
+    const orderLink = siteBase ? `${siteBase.replace(/\/$/, '')}/order/${order.id}` : null
 
     await this.email.send({
       to: order.email,
@@ -485,6 +527,7 @@ export class OrderingService {
         <ul>${itemsHtml}</ul>
         <p><strong>Total: ${escapeHtml(total)}</strong> · ${paymentLine}</p>
         ${config.pickupInstructions ? `<p>${escapeHtml(config.pickupInstructions)}</p>` : ''}
+        ${orderLink ? `<p><a href="${escapeHtml(orderLink)}">View your order</a> — we will email you when it is ready.</p>` : ''}
       `,
     })
 

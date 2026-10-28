@@ -63,6 +63,13 @@ async function bootstrap() {
     ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "square_payment_id" varchar(255) NULL;
     ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "square_order_id" varchar(255) NULL;
     ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "square_payment_id" varchar(255) NULL;
+    ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "fulfillment_status" varchar(32) NOT NULL DEFAULT 'received';
+    ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "tracking_number" varchar(255) NULL;
+    ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "tracking_carrier" varchar(255) NULL;
+    ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "tracking_url" varchar(1000) NULL;
+    ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "fulfillment_note" text NULL;
+    ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "fulfillment_history" jsonb NULL;
+    ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "fulfillment_updated_at" timestamptz NULL;
     CREATE TABLE IF NOT EXISTS "${schema}"."page_hit" (
       "id" uuid NOT NULL PRIMARY KEY,
       "site_id" uuid NOT NULL,

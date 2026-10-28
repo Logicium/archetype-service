@@ -18,7 +18,7 @@ import { Type } from 'class-transformer'
 import type { Request } from 'express'
 import { ShopService } from './shop.service'
 import type { ShopConfig } from '../entities/site.entity'
-import type { FulfillmentType, ShippingAddress } from '../entities/shop-order.entity'
+import type { FulfillmentStatus, FulfillmentType, ShippingAddress } from '../entities/shop-order.entity'
 import { JwtAuthGuard, AuthRequest } from '../auth/jwt.guard'
 
 class ShopOrderItemBody {
@@ -45,6 +45,8 @@ class CreateShopOrderBody {
   @IsOptional() @ValidateNested() @Type(() => ShippingAddressBody) shippingAddress?: ShippingAddress
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => ShopOrderItemBody)
   items!: ShopOrderItemBody[]
+  /** "/order" from the checkout page: the payment provider returns to the order status page. */
+  @IsOptional() @IsString() @MaxLength(200) returnPath?: string
 }
 
 @ApiTags('shop')
@@ -116,6 +118,18 @@ class UpdateOrderStatusBody {
   @IsIn(['pending', 'paid', 'fulfilled', 'cancelled']) status!: 'pending' | 'paid' | 'fulfilled' | 'cancelled'
 }
 
+class UpdateFulfillmentBody {
+  @IsIn(['received', 'label_printed', 'shipped', 'delivered', 'ready_for_pickup', 'picked_up'])
+  status!: FulfillmentStatus
+  @IsOptional() @IsString() @MaxLength(120) trackingNumber?: string
+  @IsOptional() @IsString() @MaxLength(80) trackingCarrier?: string
+  @IsOptional() @IsString() @MaxLength(1000) trackingUrl?: string
+  /** Optional message to the customer for this step. */
+  @IsOptional() @IsString() @MaxLength(1000) note?: string
+  /** Email the customer about this step. Default true. */
+  @IsOptional() @IsBoolean() notify?: boolean
+}
+
 @ApiTags('admin:shop')
 @UseGuards(JwtAuthGuard)
 @Controller('v1/admin/sites/:siteId')
@@ -160,6 +174,17 @@ export class AdminShopController {
     @Req() req: AuthRequest,
   ) {
     return this.shop.updateOrderStatus(siteId, req.owner, orderId, body.status)
+  }
+
+  /** Advance the fulfillment tracker one step (and email the customer). */
+  @Patch('shop-orders/:orderId/fulfillment')
+  updateFulfillment(
+    @Param('siteId') siteId: string,
+    @Param('orderId') orderId: string,
+    @Body() body: UpdateFulfillmentBody,
+    @Req() req: AuthRequest,
+  ) {
+    return this.shop.updateFulfillment(siteId, req.owner, orderId, body)
   }
 
   @Get('shop-config')
