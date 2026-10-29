@@ -202,6 +202,9 @@ export class AdminSitesController {
       await this.vercel.setEnv(site.vercelProjectId, 'VITE_SITE_SLUG', site.slug)
       await this.vercel.setEnv(site.vercelProjectId, 'VITE_CONTENT_API', resolveDeployedContentApiUrl())
       await this.vercel.setEnv(site.vercelProjectId, 'VITE_PLATFORM_ENABLED', 'true')
+      // Public URL for the baked sitemap, robots.txt and link previews.
+      const publicUrl = site.customDomain ? `https://${site.customDomain}` : site.vercelProductionUrl
+      if (publicUrl) await this.vercel.setEnv(site.vercelProjectId, 'VITE_SITE_URL', publicUrl)
     } catch (e) {
       // Surface the localhost-URL guard error clearly instead of silently shipping a broken build.
       throw new Error(`Cannot redeploy: ${(e as Error).message}`)

@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { InjectRepository } from '@mikro-orm/nestjs'
 import { EntityManager, EntityRepository } from '@mikro-orm/postgresql'
 import { MenuItem } from '../entities/menu-item.entity'
-import { MealOrder, MealOrderLine } from '../entities/meal-order.entity'
+import { MealOrder, MealOrderLine, DeliveryAddress, MealFulfillment } from '../entities/meal-order.entity'
 import { OrderingConfig, Site } from '../entities/site.entity'
 import { Owner } from '../entities/owner.entity'
 import { EmailService } from '../common/email.service'
@@ -36,6 +36,8 @@ export interface CreateMealOrderDto {
   notes?: string
   pickupAt: string // ISO
   items: Array<{ menuItemId: string; quantity: number; notes?: string }>
+  fulfillment?: MealFulfillment
+  deliveryAddress?: DeliveryAddress
 }
 
 export interface MenuItemInput {
@@ -91,6 +93,12 @@ export class OrderingService {
       currency: config.currency,
       categories: [...new Set(all.map(i => i.category).filter(Boolean))],
       items: all.map(i => this.publicItem(i)),
+      // How the kitchen hands orders over, for the checkout page.
+      fulfillment: config.fulfillment,
+      deliveryFeeCents: config.deliveryFeeCents,
+      deliveryMinimumCents: config.deliveryMinimumCents,
+      deliveryArea: config.deliveryArea,
+      deliveryInstructions: config.deliveryInstructions,
     }
   }
 
@@ -131,6 +139,14 @@ export class OrderingService {
     const config = resolveOrderingConfig(site.orderingConfig)
 
     if (!dto.items?.length) throw new BadRequestException('Order is empty')
+    const fulfillment: MealFulfillment = dto.fulfillment ?? 'pickup'
+    if (!config.fulfillment.includes(fulfillment)) {
+      throw new BadRequestException(fulfillment === 'delivery' ? 'This kitchen does not deliver' : 'This kitchen does not offer pickup')
+    }
+    if (fulfillment === 'delivery') {
+      const a = dto.deliveryAddress
+      if (!a?.line1?.trim() || !a.city?.trim() || !a.postalCode?.trim()) throw new BadRequestException('Delivery address is incomplete')
+    }
     const pickupAt = new Date(dto.pickupAt)
     if (isNaN(pickupAt.getTime())) throw new BadRequestException('Invalid pickupAt')
     const snapped = snapToSlot(pickupAt, config.slotMinutes)
@@ -176,6 +192,12 @@ export class OrderingService {
       subtotalCents += lineTotal
     }
 
+    if (fulfillment === 'delivery' && config.deliveryMinimumCents > 0 && subtotalCents < config.deliveryMinimumCents) {
+      const min = new Intl.NumberFormat('en-US', { style: 'currency', currency: config.currency }).format(config.deliveryMinimumCents / 100)
+      throw new BadRequestException(`Delivery orders start at ${min}`)
+    }
+    const deliveryFeeCents = fulfillment === 'delivery' ? config.deliveryFeeCents : 0
+
     const order = this.em.create(MealOrder, {
       site,
       name: dto.name,
@@ -183,9 +205,12 @@ export class OrderingService {
       phone: dto.phone,
       notes: dto.notes,
       pickupAt,
+      fulfillment,
+      deliveryAddress: fulfillment === 'delivery' ? dto.deliveryAddress : undefined,
+      deliveryFeeCents,
       items: lines,
       subtotalCents,
-      totalCents: subtotalCents,
+      totalCents: subtotalCents + deliveryFeeCents,
       currency: config.currency,
     })
     await this.em.persistAndFlush(order)
@@ -253,6 +278,12 @@ export class OrderingService {
         unit_amount: i.unitPriceCents,
       },
     }))
+    if (order.deliveryFeeCents > 0) {
+      lineItems.push({
+        quantity: 1,
+        price_data: { currency: config.currency.toLowerCase(), product_data: { name: 'Delivery' }, unit_amount: order.deliveryFeeCents },
+      })
+    }
 
     const checkout = await this.payments.createDestinationCheckout({
       owner: site.owner,
@@ -317,7 +348,12 @@ export class OrderingService {
     const order = await this.orders.findOne({ id }, { populate: ['site'] })
     if (!order) throw new NotFoundException('Order not found')
     const config = resolveOrderingConfig(order.site.orderingConfig)
-    return { ...this.publicOrder(order), pickupInstructions: config.pickupInstructions || null, timezone: config.timezone }
+    return {
+      ...this.publicOrder(order),
+      pickupInstructions: config.pickupInstructions || null,
+      deliveryInstructions: config.deliveryInstructions || null,
+      timezone: config.timezone,
+    }
   }
 
   // ----- Admin: menu items -----
@@ -417,10 +453,15 @@ export class OrderingService {
     const config = resolveOrderingConfig(site.orderingConfig)
     const siteName = site.displayName || site.slug
     const pickupLocal = new Intl.DateTimeFormat('en-US', { timeZone: config.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(order.pickupAt)
+    const delivery = order.fulfillment === 'delivery'
     const copy = {
-      confirmed: { subject: `${siteName} confirmed your order`, headline: 'Your order is confirmed.', body: `We are on it. Pickup at ${pickupLocal}.` },
-      ready: { subject: `Your ${siteName} order is ready`, headline: 'Your order is ready for pickup.', body: config.pickupInstructions || 'Come on in whenever you are ready.' },
-      completed: { subject: `Thanks from ${siteName}`, headline: 'Thanks for your order.', body: 'We hope you enjoyed it. See you next time.' },
+      confirmed: { subject: `${siteName} confirmed your order`, headline: 'Your order is confirmed.', body: `We are on it. ${delivery ? 'Delivery around' : 'Pickup at'} ${pickupLocal}.` },
+      ready: delivery
+        ? { subject: `Your ${siteName} order is on its way`, headline: 'Your order is on its way.', body: config.deliveryInstructions || 'Keep an eye out for the driver.' }
+        : { subject: `Your ${siteName} order is ready`, headline: 'Your order is ready for pickup.', body: config.pickupInstructions || 'Come on in whenever you are ready.' },
+      completed: delivery
+        ? { subject: `Thanks from ${siteName}`, headline: 'Your order was delivered.', body: 'We hope you enjoy it. Reply to this email if anything is not right.' }
+        : { subject: `Thanks from ${siteName}`, headline: 'Thanks for your order.', body: 'We hope you enjoyed it. See you next time.' },
       cancelled: { subject: `Your ${siteName} order was cancelled`, headline: 'Your order was cancelled.', body: 'If you paid online, the refund is on its way back to your card. Reply to this email with any questions.' },
     }[status]
     const base = site.customDomain ? `https://${site.customDomain}` : site.vercelProductionUrl
@@ -487,6 +528,9 @@ export class OrderingService {
       phone: o.phone,
       notes: o.notes,
       pickupAt: o.pickupAt.toISOString(),
+      fulfillment: o.fulfillment ?? 'pickup',
+      deliveryAddress: o.deliveryAddress ?? null,
+      deliveryFeeCents: o.deliveryFeeCents ?? 0,
       items: o.items,
       subtotalCents: o.subtotalCents,
       totalCents: o.totalCents,
@@ -514,20 +558,28 @@ export class OrderingService {
       const note = it.notes ? ` <em>(${escapeHtml(it.notes)})</em>` : ''
       return `<li>${escapeHtml(it.name)} × ${it.quantity} — ${escapeHtml(fmt(it.lineTotalCents))}${note}</li>`
     }).join('')
-    const paymentLine = order.paymentStatus === 'paid' ? 'Paid online' : 'Pay at pickup'
+    const delivery = order.fulfillment === 'delivery'
+    const paymentLine = order.paymentStatus === 'paid' ? 'Paid online' : (delivery ? 'Pay on delivery' : 'Pay at pickup')
     const siteBase = site.customDomain ? `https://${site.customDomain}` : site.vercelProductionUrl
     const orderLink = siteBase ? `${siteBase.replace(/\/$/, '')}/order/${order.id}` : null
+    const a = order.deliveryAddress
+    const addressHtml = delivery && a
+      ? `<p><strong>Deliver to:</strong><br />${escapeHtml(a.line1)}${a.line2 ? '<br />' + escapeHtml(a.line2) : ''}<br />${escapeHtml(a.city)}${a.region ? ', ' + escapeHtml(a.region) : ''} ${escapeHtml(a.postalCode)}</p>`
+      : ''
+    const feeLine = order.deliveryFeeCents ? `<br />Delivery: ${escapeHtml(fmt(order.deliveryFeeCents))}` : ''
+    const handoff = delivery ? config.deliveryInstructions : config.pickupInstructions
 
     await this.email.send({
       to: order.email,
-      subject: `Your order from ${siteName} — pickup ${pickupLocal}`,
+      subject: `Your order from ${siteName} — ${delivery ? 'delivery around' : 'pickup'} ${pickupLocal}`,
       html: `
         <p>Hi ${escapeHtml(order.name)},</p>
-        <p>We've got your order. Pickup at <strong>${escapeHtml(pickupLocal)}</strong>.</p>
+        <p>We've got your order. ${delivery ? 'Delivery around' : 'Pickup at'} <strong>${escapeHtml(pickupLocal)}</strong>.</p>
         <ul>${itemsHtml}</ul>
-        <p><strong>Total: ${escapeHtml(total)}</strong> · ${paymentLine}</p>
-        ${config.pickupInstructions ? `<p>${escapeHtml(config.pickupInstructions)}</p>` : ''}
-        ${orderLink ? `<p><a href="${escapeHtml(orderLink)}">View your order</a> — we will email you when it is ready.</p>` : ''}
+        <p>Subtotal: ${escapeHtml(fmt(order.subtotalCents))}${feeLine}<br /><strong>Total: ${escapeHtml(total)}</strong> · ${paymentLine}</p>
+        ${addressHtml}
+        ${handoff ? `<p>${escapeHtml(handoff)}</p>` : ''}
+        ${orderLink ? `<p><a href="${escapeHtml(orderLink)}">View your order</a> — we will email you when it is ${delivery ? 'on its way' : 'ready'}.</p>` : ''}
       `,
     })
 
@@ -535,10 +587,11 @@ export class OrderingService {
     if (notify) {
       await this.email.send({
         to: notify,
-        subject: `New order — ${siteName} — pickup ${pickupLocal}`,
+        subject: `New ${delivery ? 'delivery' : 'pickup'} order — ${siteName} — ${pickupLocal}`,
         html: `
           <p>New order from <strong>${escapeHtml(order.name)}</strong> (${escapeHtml(order.email)})${order.phone ? ` · ${escapeHtml(order.phone)}` : ''}</p>
-          <p>Pickup: <strong>${escapeHtml(pickupLocal)}</strong></p>
+          <p>${delivery ? 'Deliver around' : 'Pickup'}: <strong>${escapeHtml(pickupLocal)}</strong></p>
+          ${addressHtml}
           <ul>${itemsHtml}</ul>
           <p><strong>Total: ${escapeHtml(total)}</strong> · ${paymentLine}</p>
           ${order.notes ? `<p><em>${escapeHtml(order.notes)}</em></p>` : ''}

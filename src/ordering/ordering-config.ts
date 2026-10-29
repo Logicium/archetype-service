@@ -19,6 +19,11 @@ export const DEFAULT_ORDERING_CONFIG: Required<OrderingConfig> = {
   pickupInstructions: '',
   notifyEmail: '',
   collectPayment: true,
+  fulfillment: ['pickup'],
+  deliveryFeeCents: 0,
+  deliveryMinimumCents: 0,
+  deliveryArea: '',
+  deliveryInstructions: '',
 }
 
 /**
@@ -42,6 +47,11 @@ export function resolveOrderingConfig(override?: OrderingConfig | null): Require
     pickupInstructions: override?.pickupInstructions ?? DEFAULT_ORDERING_CONFIG.pickupInstructions,
     notifyEmail: override?.notifyEmail ?? DEFAULT_ORDERING_CONFIG.notifyEmail,
     collectPayment: override?.collectPayment ?? DEFAULT_ORDERING_CONFIG.collectPayment,
+    fulfillment: override?.fulfillment?.length ? override.fulfillment : DEFAULT_ORDERING_CONFIG.fulfillment,
+    deliveryFeeCents: override?.deliveryFeeCents ?? DEFAULT_ORDERING_CONFIG.deliveryFeeCents,
+    deliveryMinimumCents: override?.deliveryMinimumCents ?? DEFAULT_ORDERING_CONFIG.deliveryMinimumCents,
+    deliveryArea: override?.deliveryArea ?? DEFAULT_ORDERING_CONFIG.deliveryArea,
+    deliveryInstructions: override?.deliveryInstructions ?? DEFAULT_ORDERING_CONFIG.deliveryInstructions,
   }
 }
 

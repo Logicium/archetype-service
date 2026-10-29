@@ -12,6 +12,17 @@ export type MealOrderStatus = 'pending' | 'confirmed' | 'ready' | 'completed' | 
  */
 export type MealPaymentStatus = 'unpaid' | 'awaiting' | 'paid'
 
+/** Pickup at the counter, or local delivery to the address on the order. */
+export type MealFulfillment = 'pickup' | 'delivery'
+
+export interface DeliveryAddress {
+  line1: string
+  line2?: string
+  city: string
+  region?: string
+  postalCode: string
+}
+
 export interface MealOrderLine {
   menuItemId: string
   sku: string
@@ -29,7 +40,7 @@ export interface MealOrderLine {
  */
 @Entity()
 export class MealOrder {
-  [OptionalProps]?: 'createdAt' | 'updatedAt' | 'status' | 'currency' | 'paymentStatus'
+  [OptionalProps]?: 'createdAt' | 'updatedAt' | 'status' | 'currency' | 'paymentStatus' | 'fulfillment' | 'deliveryFeeCents'
 
   @PrimaryKey({ type: 'uuid' })
   id: string = randomUUID()
@@ -43,9 +54,20 @@ export class MealOrder {
   @Property({ nullable: true }) phone?: string
   @Property({ type: 'text', nullable: true }) notes?: string
 
+  /** Ready-by slot for pickup, or the delivery window start for delivery. */
   @Property()
   @Index()
   pickupAt!: Date
+
+  /** Plain varchar, not an enum, so a new method never needs a migration. */
+  @Property({ type: 'string', length: 16, default: 'pickup' })
+  fulfillment: MealFulfillment = 'pickup'
+
+  @Property({ type: 'json', nullable: true })
+  deliveryAddress?: DeliveryAddress
+
+  @Property({ default: 0 })
+  deliveryFeeCents: number = 0
 
   @Property({ type: 'json' })
   items: MealOrderLine[] = []

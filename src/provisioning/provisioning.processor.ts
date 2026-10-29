@@ -199,6 +199,9 @@ export class ProvisioningProcessor extends WorkerHost {
       await this.vercel.setEnv(proj.id, 'VITE_SITE_SLUG', site!.slug)
       await this.vercel.setEnv(proj.id, 'VITE_CONTENT_API', this.resolveContentApiUrl())
       await this.vercel.setEnv(proj.id, 'VITE_PLATFORM_ENABLED', 'true')
+      // Public URL for the baked sitemap, robots.txt and link previews;
+      // replaced by the custom domain once the owner adds one.
+      await this.vercel.setEnv(proj.id, 'VITE_SITE_URL', site!.vercelProductionUrl as string)
       return proj
     })
 

@@ -47,6 +47,11 @@ export class DomainsController {
     // The owner will try to sign in on this domain as soon as DNS resolves,
     // so let CORS pick it up now rather than after the cache TTL.
     this.sites.invalidateOrigins()
+    // The build bakes the site's public URL into the sitemap, robots.txt and
+    // link-preview tags; point it at the custom domain for the next deploy.
+    if (site.vercelProjectId) {
+      await this.vercel.setEnv(site.vercelProjectId, 'VITE_SITE_URL', `https://${domain}`).catch(() => undefined)
+    }
     return { domain, dns: dnsInstructions(domain) }
   }
 

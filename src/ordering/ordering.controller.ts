@@ -18,12 +18,21 @@ import { Type } from 'class-transformer'
 import type { Request } from 'express'
 import { OrderingService } from './ordering.service'
 import type { OrderingConfig } from '../entities/site.entity'
+import type { DeliveryAddress, MealFulfillment } from '../entities/meal-order.entity'
 import { JwtAuthGuard, AuthRequest } from '../auth/jwt.guard'
 
 class MealOrderItemBody {
   @IsString() menuItemId!: string
   @IsInt() @Min(1) quantity!: number
   @IsOptional() @IsString() @MaxLength(300) notes?: string
+}
+
+class DeliveryAddressBody {
+  @IsString() @MaxLength(200) line1!: string
+  @IsOptional() @IsString() @MaxLength(200) line2?: string
+  @IsString() @MaxLength(120) city!: string
+  @IsOptional() @IsString() @MaxLength(120) region?: string
+  @IsString() @MaxLength(20) postalCode!: string
 }
 
 class CreateMealOrderBody {
@@ -33,6 +42,9 @@ class CreateMealOrderBody {
   @IsOptional() @IsString() @MaxLength(50) phone?: string
   @IsOptional() @IsString() @MaxLength(2000) notes?: string
   @IsString() pickupAt!: string
+  /** Defaults to pickup; delivery needs an address and must be offered by the site. */
+  @IsOptional() @IsIn(['pickup', 'delivery']) fulfillment?: MealFulfillment
+  @IsOptional() @ValidateNested() @Type(() => DeliveryAddressBody) deliveryAddress?: DeliveryAddress
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => MealOrderItemBody)
   items!: MealOrderItemBody[]
 }

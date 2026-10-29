@@ -70,6 +70,9 @@ async function bootstrap() {
     ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "fulfillment_note" text NULL;
     ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "fulfillment_history" jsonb NULL;
     ALTER TABLE "${schema}"."shop_order" ADD COLUMN IF NOT EXISTS "fulfillment_updated_at" timestamptz NULL;
+    ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "fulfillment" varchar(16) NOT NULL DEFAULT 'pickup';
+    ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "delivery_address" jsonb NULL;
+    ALTER TABLE "${schema}"."meal_order" ADD COLUMN IF NOT EXISTS "delivery_fee_cents" int NOT NULL DEFAULT 0;
     CREATE TABLE IF NOT EXISTS "${schema}"."page_hit" (
       "id" uuid NOT NULL PRIMARY KEY,
       "site_id" uuid NOT NULL,

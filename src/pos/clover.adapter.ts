@@ -192,7 +192,7 @@ export class CloverAdapter implements PosAdapter {
     const pickup = order.pickupAt
       ? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(order.pickupAt)
       : ''
-    const title = [config.titlePrefix, order.name, pickup && `- ${pickup}`].filter(Boolean).join(' ')
+    const title = [config.titlePrefix, order.fulfillment === 'delivery' ? 'DELIVERY' : '', order.name, pickup && `- ${pickup}`].filter(Boolean).join(' ')
     const created = await call(`${base}/orders`, {
       method: 'POST',
       body: JSON.stringify({
@@ -274,8 +274,13 @@ export class CloverAdapter implements PosAdapter {
 
   /** Customer context belongs on the ticket header, not in a line item. */
   private orderNote(order: MealOrder): string {
+    const a = order.deliveryAddress
+    const deliverTo = order.fulfillment === 'delivery' && a
+      ? `Deliver to: ${[a.line1, a.line2, `${a.city} ${a.postalCode}`].filter(Boolean).join(', ')}`
+      : ''
     return [
       `Online order ${order.id.slice(0, 8)}`,
+      deliverTo,
       order.phone ? `Phone: ${order.phone}` : '',
       order.email ? `Email: ${order.email}` : '',
       order.notes ? `Notes: ${order.notes}` : '',

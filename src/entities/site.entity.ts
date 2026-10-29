@@ -103,6 +103,16 @@ export interface OrderingConfig {
   /** Take payment online through the owner's Stripe Connect account. Default true.
    *  Only takes effect once the owner can accept charges; otherwise orders are pay-at-pickup. */
   collectPayment?: boolean
+  /** How orders reach the customer. Default ['pickup']. */
+  fulfillment?: Array<'pickup' | 'delivery'>
+  /** Flat delivery fee in cents. Default 0. */
+  deliveryFeeCents?: number
+  /** Smallest subtotal (cents) that qualifies for delivery. Default 0 = no minimum. */
+  deliveryMinimumCents?: number
+  /** Where you deliver, in the owner's words ("Within Trinidad city limits"). */
+  deliveryArea?: string
+  /** Shown after a delivery order is placed and in the on-its-way email. */
+  deliveryInstructions?: string
 }
 
 /** POS vendors. Clover ships first; the others are accepted by the schema so
